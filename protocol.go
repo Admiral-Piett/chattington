@@ -2,6 +2,7 @@ package main
 
 import (
     "bufio"
+    "errors"
     "io"
     "log"
     "strings"
@@ -35,6 +36,9 @@ func NewCommandReader(reader io.Reader) *ChatReader {
 
 func (r *ChatReader) Read() (string, error) {
     value, err := r.reader.ReadString('\n')
+    // Looks like can usually expect an io.EOF on connection death here, or potential bad characters, etc.  Either
+    //way, log it back to the user, so they can see it and stop putting garbage back (assuming they haven't
+    //killed their connection in which case it won't matter).
     if err != nil {
         return "", err
     }
@@ -44,6 +48,10 @@ func (r *ChatReader) Read() (string, error) {
     cmd := strings.Split(value, " ")[0]
     // TODO - add other commands in here
     switch {
+    // FIXME - this is a little ham-fisted.  Come up with another way of not blocking a pattern of user input.
+    case strings.HasPrefix(cmd, "---"):
+        log.Printf("Invalid command: %s\n", value)
+        return "", errors.New("Invalid input")
     case cmd == "\\name":
         log.Printf("Name Command: %s\n", value)
     default:
