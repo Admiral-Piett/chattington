@@ -1,14 +1,15 @@
 package main
 
 import (
-	"github.com/reiver/go-telnet"
+    "log"
 )
 
 func main() {
-    handler := ChatHandler{}
-
-    err := telnet.ListenAndServe(":23", handler)
-    if nil != err {
-        panic(err)
+    s, err := NewServer()
+    if err != nil {
+        log.Fatal(err)
     }
+    defer s.Close()
+
+    s.Start()
 }
