@@ -13,8 +13,8 @@ import (
 
 type Server struct {
     listener net.Listener
-    clients  map[string]*Client     // Currently connected clients.
-    rooms    map[string][]*Client    // Running chat rooms.
+    clients  map[string]*Client     // Currently connected clients.  {<client.name> : *Client}
+    rooms    map[string][]*Client    // Running chat rooms.  {<room_name> : [*Client, ...]}
     mutex    *sync.Mutex
 }
 
@@ -76,6 +76,8 @@ func (s *Server) parseResponse(cmd string, client *Client) string {
         return s.listMembers(client.CurrentRoom)
     case cmd == "\\list-rooms":
         return s.listRooms()
+    case cmd == "\\whoami":
+        return s.displayClientStats(client)
     }
     // TODO - \\whoami - Show name and current room?
     // TODO - \\create-private - private room??? - How would that even work?
@@ -122,18 +124,26 @@ func (s *Server) changeClientName(name string, client *Client) string {
     return "User name reset"
 }
 
+func (s *Server) displayClientStats(client *Client) string {
+    currentRoom := client.CurrentRoom
+    if currentRoom == "" {
+        currentRoom = "None"
+    }
+    return fmt.Sprintf("\nClient Name: %s\nCurrent Room: %s", client.name, currentRoom)
+}
+
 func (s *Server) listRooms() string {
     if len(s.rooms) < 1 {
         return "No rooms yet - make one!"
     }
     roomString := ""
     for name, members := range(s.rooms) {
-        roomString = roomString + fmt.Sprintf("Room: %s\nMembers:\n", name)
+        roomString = roomString + fmt.Sprintf("  Room: %s\n  Members:\n", name)
         for _, client := range members {
             roomString = roomString + fmt.Sprintf("\t%s\n", client.name)
         }
     }
-    return fmt.Sprintf("Current rooms: \n%s", roomString)
+    return fmt.Sprintf("\nCurrent rooms: \n%s", roomString)
 }
 
 func (s *Server) listMembers(roomName string) string {
@@ -144,13 +154,16 @@ func (s *Server) listMembers(roomName string) string {
     for _, client := range(s.rooms[roomName]) {
         roomString = roomString + fmt.Sprintf("\t%s\n", client.name)
     }
-    return fmt.Sprintf("Current Members:\n%s", roomString)
+    return fmt.Sprintf("\nCurrent Members:\n%s", roomString)
 }
 
 func (s *Server) createRoom(roomName string, client *Client) string {
     if s.rooms[roomName] != nil{
         return "Room already exists - use `\\join` to join the chat."
     }
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+
     log.Printf("Creating Room: %s\n", roomName)
     s.rooms[roomName] = []*Client{client}
 
@@ -168,6 +181,9 @@ func (s *Server) joinRoom(roomName string, client *Client) string {
     if client.CurrentRoom == roomName {
         return fmt.Sprintf("You're already in room %s!", roomName)
     }
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+
     s.rooms[roomName] = append(s.rooms[roomName], client)
 
     // Leave any existing rooms this user is in since you can only be in 1.
@@ -211,6 +227,9 @@ func (s *Server) leaveRoom(roomName string, client *Client) {
 }
 
 func (s *Server) removeConnection(client *Client) {
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+
     delete(s.clients, client.name)
     log.Printf("Removed connection %v from pool, total clients: %v\n", client.conn.RemoteAddr().String(), len(s.clients))
 }
@@ -223,7 +242,7 @@ func (s *Server) listen(client *Client) {
         input, err := Read(r)
         if err != nil && err != io.EOF {
             log.Printf("Read error: %v\n", err)
-            client.WriteResponse(input)
+            client.WriteResponse(input, nil)
         }
 
         // NOTE: This fires only when the Client kills its connection
@@ -235,12 +254,20 @@ func (s *Server) listen(client *Client) {
             if strings.HasPrefix(input, "\\") {
                 response := s.parseResponse(input, client)
                 if response != "" {
-                    client.WriteResponse(response)
+                    client.WriteResponse(response, nil)
                 }
+            } else if client.CurrentRoom != "" {
+                go s.broadcastToRoom(input, client)
             } else {
-                client.WriteResponse(input)
+                client.WriteResponse(input, nil)
             }
         }
 
+    }
+}
+
+func (s *Server) broadcastToRoom(message string, client *Client) {
+    for _, c := range s.rooms[client.CurrentRoom] {
+        c.WriteResponse(message, client.name)
     }
 }
