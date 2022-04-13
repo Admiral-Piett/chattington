@@ -72,12 +72,11 @@ func (s *Server) parseResponse(cmd string, client *Client) (string, bool) {
     case cmd == "\\list" && value != "":
         return s.listRooms()
     case cmd == "\\leave":
+        roomName := client.CurrentRoom
         s.leaveRoom(client.CurrentRoom, client)
-        s := fmt.Sprintf("Left room %s", client.CurrentRoom)
+
         client.CurrentRoom = ""
-        // TODO - HERE - this isn't working since we've already left the room before doing it.
-        //  I don't really want to but we may have to fire a broadcast from in here.
-        return s, true
+        return fmt.Sprintf("You have left room %s", roomName), false
     case cmd == "\\list":  // list the members of your current room
         return s.listMembers(client.CurrentRoom)
     case cmd == "\\list-rooms":
@@ -165,14 +164,15 @@ func (s *Server) createRoom(roomName string, client *Client) (string, bool) {
     if s.rooms[roomName] != nil{
         return "Room already exists - use `\\join` to join the chat.", false
     }
+    // Defer first since this since it also locks the mutex and this should run last.
+    // Leave any existing rooms this user is in since you can only be in 1.
+    defer s.leaveRoom(client.CurrentRoom, client)
+
     s.mutex.Lock()
     defer s.mutex.Unlock()
 
     log.Printf("Creating Room: %s\n", roomName)
     s.rooms[roomName] = []*Client{client}
-
-    // Leave any existing rooms this user is in since you can only be in 1.
-    s.leaveRoom(client.CurrentRoom, client)
 
     client.CurrentRoom = roomName
     return fmt.Sprintf("New room created: %s", roomName), false
@@ -185,13 +185,14 @@ func (s *Server) joinRoom(roomName string, client *Client) (string, bool) {
     if client.CurrentRoom == roomName {
         return fmt.Sprintf("You're already in room %s!", roomName), false
     }
+    // Defer first since this since it also locks the mutex and this should run last.
+    // Leave any existing rooms this user is in since you can only be in 1.
+    defer s.leaveRoom(client.CurrentRoom, client)
+
     s.mutex.Lock()
     defer s.mutex.Unlock()
 
     s.rooms[roomName] = append(s.rooms[roomName], client)
-
-    // Leave any existing rooms this user is in since you can only be in 1.
-    s.leaveRoom(client.CurrentRoom, client)
 
     client.CurrentRoom = roomName
     return fmt.Sprintf("%s has entered: %s", client.name, roomName), true
@@ -219,6 +220,11 @@ func (s *Server) leaveRoom(roomName string, client *Client) {
     if len(s.rooms[roomName]) == 0 {
        delete(s.rooms, roomName)
     }
+
+    // I hate to do this in here, but I don't really want to pass roomName up through all these methods and
+    //their associated conditions when 90% of the time it's going to be what's already on the client.  So
+    //leaving this for now.
+    go s.broadcastToRoom(fmt.Sprintf("%s has left the room %s.", client.name, roomName), roomName, client)
 
     // TODO - Consider the map version below relying on this data structure
     //      {<room name>: {<client name>: <client pointer>} }
@@ -259,13 +265,13 @@ func (s *Server) listen(client *Client) {
                 response, toBroadcast := s.parseResponse(input, client)
                 if response != "" {
                     if toBroadcast {
-                        go s.broadcastToRoom(response, client)
+                        go s.broadcastToRoom(response, client.CurrentRoom, client)
                     } else {
                         client.WriteResponse(response, nil)
                     }
                 }
             } else if client.CurrentRoom != "" {
-                go s.broadcastToRoom(input, client)
+                go s.broadcastToRoom(input, client.CurrentRoom, client)
             } else {
                 client.WriteResponse(input, nil)
             }
@@ -274,12 +280,12 @@ func (s *Server) listen(client *Client) {
     }
 }
 
-func (s *Server) broadcastToRoom(message string, client *Client) {
+func (s *Server) broadcastToRoom(message, roomName string, client *Client) {
     // If no one is in the room I'm in then just send it to myself.
-    if len(s.rooms[client.CurrentRoom]) < 1 {
+    if len(s.rooms[roomName]) < 1 {
         client.WriteResponse(message, nil)
     }
-    for _, c := range s.rooms[client.CurrentRoom] {
+    for _, c := range s.rooms[roomName] {
         c.WriteResponse(message, client.name)
     }
 }

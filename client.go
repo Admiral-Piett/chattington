@@ -23,7 +23,7 @@ func (c *Client) WriteString(msg string) error {
 
 func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
     // Using `sendingClient` you can send in the string name who the sender of the message is, if it's `nil` we'll
-    //  or the same as the target client (`c`) then we can format the response as if it's from that person.
+    //  or the same as the target client (`c`) then we can format the response as i.
     prefix := ""
     if sendingClient == nil || sendingClient == c.name {
         prefix = fmt.Sprintf("%s>", c.name)
