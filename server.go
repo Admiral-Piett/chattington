@@ -59,18 +59,23 @@ func (s *Server) parseResponse(cmd string, client *Client) string {
         cmd = cmd[:cmdIndex]
     }
     switch {
-    case cmd == "\\leave":  // TODO - \\leave - leave room
-        return ""
-    case cmd == "\\list":  // TODO - \\list members
-        return ""
-    case cmd == "\\list-rooms":
-        return s.listRooms()
     case cmd == "\\name" && value != "":
         return s.changeClientName(value, client)
     case cmd == "\\create" && value != "":
         return s.createRoom(value, client)
     case cmd == "\\join" && value != "":
         return s.joinRoom(value, client)
+    case cmd == "\\list" && value != "":
+        return s.listRooms()
+    case cmd == "\\leave":
+        s.leaveRoom(client.CurrentRoom, client)
+        s := fmt.Sprintf("Left room %s", client.CurrentRoom)
+        client.CurrentRoom = ""
+        return s
+    case cmd == "\\list":  // list the members of your current room
+        return s.listMembers(client.CurrentRoom)
+    case cmd == "\\list-rooms":
+        return s.listRooms()
     }
     // TODO - \\whoami - Show name and current room?
     // TODO - \\create-private - private room??? - How would that even work?
@@ -118,7 +123,6 @@ func (s *Server) changeClientName(name string, client *Client) string {
 }
 
 func (s *Server) listRooms() string {
-    log.Println("Listing rooms")
     if len(s.rooms) < 1 {
         return "No rooms yet - make one!"
     }
@@ -130,6 +134,17 @@ func (s *Server) listRooms() string {
         }
     }
     return fmt.Sprintf("Current rooms: \n%s", roomString)
+}
+
+func (s *Server) listMembers(roomName string) string {
+    if s.rooms[roomName] == nil {
+        return fmt.Sprintf("No such room %s!", roomName)
+    }
+    roomString := ""
+    for _, client := range(s.rooms[roomName]) {
+        roomString = roomString + fmt.Sprintf("\t%s\n", client.name)
+    }
+    return fmt.Sprintf("Current Members:\n%s", roomString)
 }
 
 func (s *Server) createRoom(roomName string, client *Client) string {
