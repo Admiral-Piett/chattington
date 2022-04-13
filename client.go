@@ -12,6 +12,7 @@ type Client struct {
     conn   net.Conn
     name   string
     writer io.Writer
+    CurrentRoom string
 }
 
 func (c *Client) WriteString(msg string) error {
@@ -22,7 +23,7 @@ func (c *Client) WriteString(msg string) error {
 
 func (c *Client) WriteResponse(msg string) error {
     // Add chat room response formatting
-    msg = fmt.Sprintf("%s: %s\n", c.name, msg)
+    msg = fmt.Sprintf("%s: %s\n%s> ", c.name, msg, c.name)
     return c.WriteString(msg)
 }
 
