@@ -59,18 +59,19 @@ func (s *Server) parseResponse(cmd string, client *Client) string {
         cmd = cmd[:cmdIndex]
     }
     switch {
-    case cmd == "\\list":
+    case cmd == "\\leave":  // TODO - \\leave - leave room
+        return ""
+    case cmd == "\\list":  // TODO - \\list members
+        return ""
+    case cmd == "\\list-rooms":
         return s.listRooms()
     case cmd == "\\name" && value != "":
         return s.changeClientName(value, client)
     case cmd == "\\create" && value != "":
         return s.createRoom(value, client)
     case cmd == "\\join" && value != "":
-        log.Printf("Join Command: %s\n", value)
-        //TODO - leave current room and join another
-        return ""
+        return s.joinRoom(value, client)
     }
-    // TODO - \\leave - leave room
     // TODO - \\whoami - Show name and current room?
     // TODO - \\create-private - private room??? - How would that even work?
     // TODO - broadcast message to room
@@ -145,6 +146,22 @@ func (s *Server) createRoom(roomName string, client *Client) string {
     return fmt.Sprintf("New room created: %s", roomName)
 }
 
+func (s *Server) joinRoom(roomName string, client *Client) string {
+    if s.rooms[roomName] == nil {
+        return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName)
+    }
+    if client.CurrentRoom == roomName {
+        return fmt.Sprintf("You're already in room %s!", roomName)
+    }
+    s.rooms[roomName] = append(s.rooms[roomName], client)
+
+    // Leave any existing rooms this user is in since you can only be in 1.
+    s.leaveRoom(client.CurrentRoom, client)
+
+    client.CurrentRoom = roomName
+    return fmt.Sprintf("You have entered: %s", roomName)
+}
+
 func (s *Server) leaveRoom(roomName string, client *Client) {
     // Return as a no-op here if you didn't give a roomName (you may not have entered a room yet).
     if roomName == "" {
@@ -158,7 +175,7 @@ func (s *Server) leaveRoom(roomName string, client *Client) {
     prunedList := []*Client{}
     for _, c := range(s.rooms[roomName]) {
        if client != c {
-           prunedList = append(prunedList, client)
+           prunedList = append(prunedList, c)
         }
     }
     s.rooms[roomName] = prunedList
