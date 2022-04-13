@@ -21,14 +21,17 @@ func (c *Client) WriteString(msg string) error {
     return err
 }
 
-func (c *Client) WriteResponse(msg string, targetClient interface{}) error {
-    // Using `targetClient` you can send in the string name who the sender of the message is, if it's `nil` we'll
-    //just assume it's the same as the client that is receiving the message.
-    if targetClient == nil {
-        targetClient = c.name
+func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
+    // Using `sendingClient` you can send in the string name who the sender of the message is, if it's `nil` we'll
+    //  or the same as the target client (`c`) then we can format the response as if it's from that person.
+    prefix := ""
+    if sendingClient == nil || sendingClient == c.name {
+        prefix = fmt.Sprintf("%s>", c.name)
+    } else {
+        prefix = fmt.Sprintf("%s:", sendingClient)
     }
     // Add chat room response formatting
-    msg = fmt.Sprintf("%s: %s\n%s> ", targetClient, msg, c.name)
+    msg = fmt.Sprintf("%s %s\n", prefix, msg)
     return c.WriteString(msg)
 }
 

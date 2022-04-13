@@ -50,7 +50,11 @@ func (s *Server) Start() {
     }
 }
 
-func (s *Server) parseResponse(cmd string, client *Client) string {
+// Here we will handle any commands and return anything we want to send back to the client.  If we want this to
+//  be "broadcast" (to every client in the chat room) we can answer `true` with the accompanying bool.  Most methods
+// should actually return their own values to decide whether their message gets broadcast or not, so we can send
+//error messages privately, etc.
+func (s *Server) parseResponse(cmd string, client *Client) (string, bool) {
     value := ""
     // Route any commands to their relevant methods
     cmdIndex := strings.IndexByte(cmd, ' ')
@@ -71,7 +75,9 @@ func (s *Server) parseResponse(cmd string, client *Client) string {
         s.leaveRoom(client.CurrentRoom, client)
         s := fmt.Sprintf("Left room %s", client.CurrentRoom)
         client.CurrentRoom = ""
-        return s
+        // TODO - HERE - this isn't working since we've already left the room before doing it.
+        //  I don't really want to but we may have to fire a broadcast from in here.
+        return s, true
     case cmd == "\\list":  // list the members of your current room
         return s.listMembers(client.CurrentRoom)
     case cmd == "\\list-rooms":
@@ -79,11 +85,9 @@ func (s *Server) parseResponse(cmd string, client *Client) string {
     case cmd == "\\whoami":
         return s.displayClientStats(client)
     }
-    // TODO - \\whoami - Show name and current room?
     // TODO - \\create-private - private room??? - How would that even work?
-    // TODO - broadcast message to room
     // TODO - Direct message?
-    return fmt.Sprintf("Invalid command: `%s`", cmd)
+    return fmt.Sprintf("Invalid command: `%s`", cmd), false
 }
 
 func (s *Server) createClient(conn net.Conn) *Client {
@@ -104,14 +108,14 @@ func (s *Server) createClient(conn net.Conn) *Client {
 
     s.clients[intialName] = client
 
-    nameInstructions := fmt.Sprintf("\nWe've set your user name with a default - `%s`\nIf you'd like to reset it, please use the '\\name' command.\n\n%s> ", intialName, client.name)
+    nameInstructions := fmt.Sprintf("\nWe've set your user name with a default - `%s`\nIf you'd like to reset it, please use the '\\name' command.\n\n", intialName)
 
     client.WriteString(nameInstructions)
     return client
 }
 
-func (s *Server) changeClientName(name string, client *Client) string {
-    log.Printf("User: %s is becoming -> %s\n", client.name, name)
+func (s *Server) changeClientName(name string, client *Client) (string, bool) {
+    msg := fmt.Sprintf("User: %s has become -> %s", client.name, name)
     s.mutex.Lock()
     defer s.mutex.Unlock()
 
@@ -121,20 +125,20 @@ func (s *Server) changeClientName(name string, client *Client) string {
 
     // We can still change this name value after it's been set back in the clients pool since it's a pointer.
     client.name = name
-    return "User name reset"
+    return msg, true
 }
 
-func (s *Server) displayClientStats(client *Client) string {
+func (s *Server) displayClientStats(client *Client) (string, bool) {
     currentRoom := client.CurrentRoom
     if currentRoom == "" {
         currentRoom = "None"
     }
-    return fmt.Sprintf("\nClient Name: %s\nCurrent Room: %s", client.name, currentRoom)
+    return fmt.Sprintf("\nClient Name: %s\nCurrent Room: %s", client.name, currentRoom), false
 }
 
-func (s *Server) listRooms() string {
+func (s *Server) listRooms() (string, bool) {
     if len(s.rooms) < 1 {
-        return "No rooms yet - make one!"
+        return "No rooms yet - make one!", false
     }
     roomString := ""
     for name, members := range(s.rooms) {
@@ -143,23 +147,23 @@ func (s *Server) listRooms() string {
             roomString = roomString + fmt.Sprintf("\t%s\n", client.name)
         }
     }
-    return fmt.Sprintf("\nCurrent rooms: \n%s", roomString)
+    return fmt.Sprintf("\nCurrent rooms: \n%s", roomString), false
 }
 
-func (s *Server) listMembers(roomName string) string {
+func (s *Server) listMembers(roomName string) (string, bool) {
     if s.rooms[roomName] == nil {
-        return fmt.Sprintf("No such room %s!", roomName)
+        return fmt.Sprintf("No such room %s!", roomName), false
     }
     roomString := ""
     for _, client := range(s.rooms[roomName]) {
         roomString = roomString + fmt.Sprintf("\t%s\n", client.name)
     }
-    return fmt.Sprintf("\nCurrent Members:\n%s", roomString)
+    return fmt.Sprintf("\nCurrent Members:\n%s", roomString), false
 }
 
-func (s *Server) createRoom(roomName string, client *Client) string {
+func (s *Server) createRoom(roomName string, client *Client) (string, bool) {
     if s.rooms[roomName] != nil{
-        return "Room already exists - use `\\join` to join the chat."
+        return "Room already exists - use `\\join` to join the chat.", false
     }
     s.mutex.Lock()
     defer s.mutex.Unlock()
@@ -171,15 +175,15 @@ func (s *Server) createRoom(roomName string, client *Client) string {
     s.leaveRoom(client.CurrentRoom, client)
 
     client.CurrentRoom = roomName
-    return fmt.Sprintf("New room created: %s", roomName)
+    return fmt.Sprintf("New room created: %s", roomName), false
 }
 
-func (s *Server) joinRoom(roomName string, client *Client) string {
+func (s *Server) joinRoom(roomName string, client *Client) (string, bool) {
     if s.rooms[roomName] == nil {
-        return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName)
+        return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName), false
     }
     if client.CurrentRoom == roomName {
-        return fmt.Sprintf("You're already in room %s!", roomName)
+        return fmt.Sprintf("You're already in room %s!", roomName), false
     }
     s.mutex.Lock()
     defer s.mutex.Unlock()
@@ -190,7 +194,7 @@ func (s *Server) joinRoom(roomName string, client *Client) string {
     s.leaveRoom(client.CurrentRoom, client)
 
     client.CurrentRoom = roomName
-    return fmt.Sprintf("You have entered: %s", roomName)
+    return fmt.Sprintf("%s has entered: %s", client.name, roomName), true
 }
 
 func (s *Server) leaveRoom(roomName string, client *Client) {
@@ -252,9 +256,13 @@ func (s *Server) listen(client *Client) {
 
         if input != "" {
             if strings.HasPrefix(input, "\\") {
-                response := s.parseResponse(input, client)
+                response, toBroadcast := s.parseResponse(input, client)
                 if response != "" {
-                    client.WriteResponse(response, nil)
+                    if toBroadcast {
+                        go s.broadcastToRoom(response, client)
+                    } else {
+                        client.WriteResponse(response, nil)
+                    }
                 }
             } else if client.CurrentRoom != "" {
                 go s.broadcastToRoom(input, client)
@@ -267,6 +275,10 @@ func (s *Server) listen(client *Client) {
 }
 
 func (s *Server) broadcastToRoom(message string, client *Client) {
+    // If no one is in the room I'm in then just send it to myself.
+    if len(s.rooms[client.CurrentRoom]) < 1 {
+        client.WriteResponse(message, nil)
+    }
     for _, c := range s.rooms[client.CurrentRoom] {
         c.WriteResponse(message, client.name)
     }
