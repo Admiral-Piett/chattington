@@ -10,6 +10,6 @@ func main() {
         log.Fatal(err)
     }
     defer s.Close()
-
+    s.rooms["fart"] = []string{"blah", "foo"}
     s.Start()
 }
