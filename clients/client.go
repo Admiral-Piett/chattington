@@ -1,22 +1,20 @@
-package client
+package clients
 
 import (
-    "bufio"
     "fmt"
-    "io"
-    "net"
+    "github.com/Admiral-Piett/chat-telnet/interfaces"
     "strings"
     "time"
 )
 
 type Client struct {
-    writer io.Writer
-    Conn   net.Conn
+    writer interfaces.AbstractIoWriter
+    Conn   interfaces.AbstractNetConn
     Name   string
     CurrentRoom string
 }
 
-func NewClient(conn net.Conn) (*Client, string) {
+func NewClient(conn interfaces.AbstractNetConn) (*Client, string) {
     // Generate a semi-random id for ourselves, using a `---` pattern to start.  We can lean on this for now, to
     //identify users who haven't yet given their name but still access the clients by key.
     intialName := fmt.Sprintf("%v", time.Now().Unix())
@@ -49,12 +47,8 @@ func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
     return c.WriteString(msg)
 }
 
-type ChatReader struct {
-
-}
-
 // Should I attach this to a struct?
-func Read(r *bufio.Reader) (string, error) {
+func Read(r interfaces.AbstractBufioReader) (string, error) {
     value, err := r.ReadString('\n')
     // Looks like can usually expect an io.EOF on connection death here, or potential bad characters, etc.  Either
     //way, log it back to the user, so they can see it and stop putting garbage back (assuming they haven't

@@ -1,9 +1,9 @@
-package server
+package servers
 
 import (
     "bufio"
     "fmt"
-    "github.com/Admiral-Piett/chat-telnet/client"
+    "github.com/Admiral-Piett/chat-telnet/clients"
     "io"
     "log"
     "net"
@@ -13,8 +13,8 @@ import (
 
 type Server struct {
     listener net.Listener
-    clients  map[string]*client.Client   // Currently connected clients.  {<client.name> : *Client}
-    rooms    map[string][]*client.Client // Running chat rooms.  {<room_name> : [*Client, ...]}
+    clients  map[string]*clients.Client   // Currently connected clients.  {<client.name> : *Client}
+    rooms    map[string][]*clients.Client // Running chat rooms.  {<room_name> : [*Client, ...]}
     mutex    *sync.Mutex
 }
 
@@ -25,8 +25,8 @@ func NewServer() (Server, error) {
     }
     server := Server{
         listener: l,
-        clients:  map[string]*client.Client{},
-        rooms:    map[string][]*client.Client{},
+        clients:  map[string]*clients.Client{},
+        rooms:    map[string][]*clients.Client{},
         mutex:    &sync.Mutex{},
     }
     return server, nil
@@ -54,7 +54,7 @@ func (s *Server) Start() {
 //  be "broadcast" (to every client in the chat room) we can answer `true` with the accompanying bool.  Most methods
 // should actually return their own values to decide whether their message gets broadcast or not, so we can send
 //error messages privately, etc.
-func (s *Server) parseResponse(cmd string, c *client.Client) (string, bool) {
+func (s *Server) parseResponse(cmd string, c *clients.Client) (string, bool) {
     value := ""
     // Route any commands to their relevant methods
     cmdIndex := strings.IndexByte(cmd, ' ')
@@ -89,13 +89,13 @@ func (s *Server) parseResponse(cmd string, c *client.Client) (string, bool) {
     return fmt.Sprintf("Invalid command: `%s`", cmd), false
 }
 
-func (s *Server) createClient(conn net.Conn) *client.Client {
+func (s *Server) createClient(conn net.Conn) *clients.Client {
     log.Printf("Accepting new connection from address %v, total clients: %v\n", conn.RemoteAddr().String(), len(s.clients)+1)
 
     s.mutex.Lock()
     defer s.mutex.Unlock()
 
-    c, name := client.NewClient(conn)
+    c, name := clients.NewClient(conn)
     s.clients[name] = c
 
     nameInstructions := fmt.Sprintf("\nWe've set your user name with a default - `%s`\nIf you'd like to reset it, please use the '\\name' command.\n\n", name)
@@ -104,7 +104,7 @@ func (s *Server) createClient(conn net.Conn) *client.Client {
     return c
 }
 
-func (s *Server) changeClientName(name string, c *client.Client) (string, bool) {
+func (s *Server) changeClientName(name string, c *clients.Client) (string, bool) {
     msg := fmt.Sprintf("User: %s has become -> %s", c.Name, name)
     s.mutex.Lock()
     defer s.mutex.Unlock()
@@ -118,7 +118,7 @@ func (s *Server) changeClientName(name string, c *client.Client) (string, bool) 
     return msg, true
 }
 
-func (s *Server) displayClientStats(c *client.Client) (string, bool) {
+func (s *Server) displayClientStats(c *clients.Client) (string, bool) {
     currentRoom := c.CurrentRoom
     if currentRoom == "" {
         currentRoom = "None"
@@ -151,7 +151,7 @@ func (s *Server) listMembers(roomName string) (string, bool) {
     return fmt.Sprintf("\nCurrent Members:\n%s", roomString), false
 }
 
-func (s *Server) createRoom(roomName string, c *client.Client) (string, bool) {
+func (s *Server) createRoom(roomName string, c *clients.Client) (string, bool) {
     if s.rooms[roomName] != nil{
         return "Room already exists - use `\\join` to join the chat.", false
     }
@@ -163,13 +163,13 @@ func (s *Server) createRoom(roomName string, c *client.Client) (string, bool) {
     defer s.mutex.Unlock()
 
     log.Printf("Creating Room: %s\n", roomName)
-    s.rooms[roomName] = []*client.Client{c}
+    s.rooms[roomName] = []*clients.Client{c}
 
     c.CurrentRoom = roomName
     return fmt.Sprintf("New room created: %s", roomName), false
 }
 
-func (s *Server) joinRoom(roomName string, c *client.Client) (string, bool) {
+func (s *Server) joinRoom(roomName string, c *clients.Client) (string, bool) {
     if s.rooms[roomName] == nil {
         return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName), false
     }
@@ -189,7 +189,7 @@ func (s *Server) joinRoom(roomName string, c *client.Client) (string, bool) {
     return fmt.Sprintf("%s has entered: %s", c.Name, roomName), true
 }
 
-func (s *Server) leaveRoom(roomName string, c *client.Client) {
+func (s *Server) leaveRoom(roomName string, c *clients.Client) {
     // Return as a no-op here if you didn't give a roomName (you may not have entered a room yet).
     if roomName == "" {
         return
@@ -199,7 +199,7 @@ func (s *Server) leaveRoom(roomName string, c *client.Client) {
     defer s.mutex.Unlock()
 
     // Re-create the list of clients in the given room, minus whatever client we have in play since they are leaving.
-    prunedList := []*client.Client{}
+    prunedList := []*clients.Client{}
     for _, c := range(s.rooms[roomName]) {
        if c != c {
            prunedList = append(prunedList, c)
@@ -227,7 +227,7 @@ func (s *Server) leaveRoom(roomName string, c *client.Client) {
     //}
 }
 
-func (s *Server) removeConnection(c *client.Client) {
+func (s *Server) removeConnection(c *clients.Client) {
     s.mutex.Lock()
     defer s.mutex.Unlock()
 
@@ -235,12 +235,12 @@ func (s *Server) removeConnection(c *client.Client) {
     log.Printf("Removed connection %v from pool, total clients: %v\n", c.Conn.RemoteAddr().String(), len(s.clients))
 }
 
-func (s *Server) listen(c *client.Client) {
+func (s *Server) listen(c *clients.Client) {
     r := bufio.NewReader(c.Conn)
     defer s.removeConnection(c)
 
     for {
-        input, err := client.Read(r)
+        input, err := clients.Read(r)
         if err != nil && err != io.EOF {
             log.Printf("Read error: %v\n", err)
             c.WriteResponse(input, nil)
@@ -271,7 +271,7 @@ func (s *Server) listen(c *client.Client) {
     }
 }
 
-func (s *Server) broadcastToRoom(message, roomName string, c *client.Client) {
+func (s *Server) broadcastToRoom(message, roomName string, c *clients.Client) {
     // If no one is in the room I'm in then just send it to myself.
     if len(s.rooms[roomName]) < 1 {
         c.WriteResponse(message, nil)
