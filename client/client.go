@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
     "bufio"
@@ -6,13 +6,27 @@ import (
     "io"
     "net"
     "strings"
+    "time"
 )
 
 type Client struct {
-    conn   net.Conn
-    name   string
     writer io.Writer
+    Conn   net.Conn
+    Name   string
     CurrentRoom string
+}
+
+func NewClient(conn net.Conn) (*Client, string) {
+    // Generate a semi-random id for ourselves, using a `---` pattern to start.  We can lean on this for now, to
+    //identify users who haven't yet given their name but still access the clients by key.
+    intialName := fmt.Sprintf("%v", time.Now().Unix())
+
+    return &Client{
+        Conn: conn,
+        writer: conn,
+        Name: intialName,
+        CurrentRoom: "",
+    }, intialName
 }
 
 func (c *Client) WriteString(msg string) error {
@@ -25,8 +39,8 @@ func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
     // Using `sendingClient` you can send in the string name who the sender of the message is, if it's `nil` we'll
     //  or the same as the target client (`c`) then we can format the response as i.
     prefix := ""
-    if sendingClient == nil || sendingClient == c.name {
-        prefix = fmt.Sprintf("%s>", c.name)
+    if sendingClient == nil || sendingClient == c.Name {
+        prefix = fmt.Sprintf("%s>", c.Name)
     } else {
         prefix = fmt.Sprintf("%s:", sendingClient)
     }
@@ -35,7 +49,11 @@ func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
     return c.WriteString(msg)
 }
 
-// Should I attach this to a struct
+type ChatReader struct {
+
+}
+
+// Should I attach this to a struct?
 func Read(r *bufio.Reader) (string, error) {
     value, err := r.ReadString('\n')
     // Looks like can usually expect an io.EOF on connection death here, or potential bad characters, etc.  Either

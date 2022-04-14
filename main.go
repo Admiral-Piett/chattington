@@ -1,11 +1,12 @@
 package main
 
 import (
+    "github.com/Admiral-Piett/chat-telnet/server"
     "log"
 )
 
 func main() {
-    s, err := NewServer()
+    s, err := server.NewServer()
     if err != nil {
         log.Fatal(err)
     }
