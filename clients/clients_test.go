@@ -5,8 +5,24 @@ import (
    "github.com/Admiral-Piett/chat-telnet/clients"
    "github.com/Admiral-Piett/chat-telnet/mocks"
    "github.com/stretchr/testify/assert"
+   "os"
+   "sync"
    "testing"
 )
+
+func TestMain(m *testing.M) {
+   setup()
+   code := m.Run()
+   os.Exit(code)
+}
+
+func setup() {
+   clients.ChatCache = clients.ChatMeta{
+     Clients:  map[string]*clients.Client{},
+     Rooms:    map[string][]*clients.Client{},
+     Mutex:    &sync.Mutex{},
+   }
+}
 
 func Test_WriteString_success(t *testing.T) {
    w := &mocks.IoWriterMock{}
@@ -108,4 +124,8 @@ func Test_Read_returns_error(t *testing.T) {
   assert.Error(t, err)
   assert.Empty(t, s)
   assert.True(t, m.ReadStringCalled)
+}
+
+func Test_removeConnection_success(t *testing.T) {
+//   TODO - HERE
 }
