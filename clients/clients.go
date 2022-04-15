@@ -25,7 +25,7 @@ var ChatCache = ChatMeta{
 }
 
 type Client struct {
-    writer interfaces.AbstractIoWriter
+    Writer interfaces.AbstractIoWriter
     Conn   interfaces.AbstractNetConn
     Name   string
     CurrentRoom string
@@ -43,7 +43,7 @@ func GenerateNewClient(conn interfaces.AbstractNetConn) {
     id := fmt.Sprintf("%v", time.Now().Unix())
     client := &Client{
         Conn:        conn,
-        writer:      conn,
+        Writer:      conn,
         Name:        id,
         CurrentRoom: "",
         Id:          id,
@@ -57,7 +57,7 @@ func GenerateNewClient(conn interfaces.AbstractNetConn) {
 }
 
 func (c *Client) WriteString(msg string) error {
-    _, err := c.writer.Write([]byte(msg))
+    _, err := c.Writer.Write([]byte(msg))
 
     return err
 }

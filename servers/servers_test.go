@@ -35,10 +35,13 @@ func Test_NewServer_net_listen_error(t *testing.T) {
 }
 
 func Test_Close_success(t *testing.T) {
-    m := mocks.ServerMock{}
+    l := &mocks.NetListenerMock{}
+    m := servers.Server{
+        Listener: l,
+    }
     m.Close()
 
-    assert.True(t, m.CloseCalled)
+    assert.True(t, l.CloseCalled)
 }
 
 func Test_Start_success(t *testing.T) {
