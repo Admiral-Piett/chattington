@@ -18,7 +18,7 @@ type ChatMeta struct {
     Mutex    *sync.Mutex
 }
 
-var ChatCache = ChatMeta{
+var ChatCache = &ChatMeta{
     Clients:  map[string]*Client{},
     Rooms:    map[string][]*Client{},
     Mutex:    &sync.Mutex{},
@@ -94,8 +94,133 @@ func (c *Client)removeConnection() {
     ChatCache.Mutex.Lock()
     defer ChatCache.Mutex.Unlock()
 
-    delete(ChatCache.Clients, c.Name)
+    delete(ChatCache.Clients, c.Id)
     log.Printf("Removed connection %v from pool, total clients: %v\n", c.Conn.RemoteAddr().String(), len(ChatCache.Clients))
+}
+
+func (c *Client) changeClientName(name string) (string, bool) {
+    msg := fmt.Sprintf("User: %s has become -> %s", c.Name, name)
+    ChatCache.Mutex.Lock()
+    defer ChatCache.Mutex.Unlock()
+
+    c.Name = name
+    return msg, true
+}
+
+func (c *Client) displayClientStats() (string, bool) {
+    currentRoom := c.CurrentRoom
+    if currentRoom == "" {
+        currentRoom = "None"
+    }
+    return fmt.Sprintf("\nClient Name: %s\nCurrent Room: %s", c.Name, currentRoom), false
+}
+
+func (c *Client) listRooms() (string, bool) {
+    if len(ChatCache.Rooms) < 1 {
+        return "No rooms yet - make one!", false
+    }
+    roomString := ""
+    for name, members := range(ChatCache.Rooms) {
+        roomString = roomString + fmt.Sprintf("  Room: %s\n  Members:\n", name)
+        for _, c := range members {
+            roomString = roomString + fmt.Sprintf("\t%s\n", c.Name)
+        }
+    }
+    return fmt.Sprintf("\nCurrent rooms: \n%s", roomString), false
+}
+
+func (c *Client) listMembers(roomName string) (string, bool) {
+    if ChatCache.Rooms[roomName] == nil {
+        return fmt.Sprintf("No such room %s!", roomName), false
+    }
+    roomString := ""
+    for _, c := range(ChatCache.Rooms[roomName]) {
+        roomString = roomString + fmt.Sprintf("\t%s\n", c.Name)
+    }
+    return fmt.Sprintf("\nCurrent Members:\n%s", roomString), false
+}
+
+func (c *Client) createRoom(roomName string) (string, bool) {
+    if ChatCache.Rooms[roomName] != nil{
+        return "Room already exists - use `\\join` to join the chat.", false
+    }
+    // Defer first since this since it also locks the mutex and this should run last.
+    // Leave any existing rooms this user is in since you can only be in 1.
+    defer c.leaveRoom(c.CurrentRoom)
+
+    ChatCache.Mutex.Lock()
+    defer ChatCache.Mutex.Unlock()
+
+    log.Printf("Creating Room: %s\n", roomName)
+    ChatCache.Rooms[roomName] = []*Client{c}
+
+    c.CurrentRoom = roomName
+    return fmt.Sprintf("New room created: %s", roomName), false
+}
+
+func (c *Client) joinRoom(roomName string) (string, bool) {
+    if ChatCache.Rooms[roomName] == nil {
+        return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName), false
+    }
+    if c.CurrentRoom == roomName {
+        return fmt.Sprintf("You're already in %s!", roomName), false
+    }
+    // Defer first since this since it also locks the mutex and this should run last.
+    // Leave any existing rooms this user is in since you can only be in 1.
+    defer c.leaveRoom(c.CurrentRoom)
+
+    ChatCache.Mutex.Lock()
+    defer ChatCache.Mutex.Unlock()
+
+    ChatCache.Rooms[roomName] = append(ChatCache.Rooms[roomName], c)
+
+    c.CurrentRoom = roomName
+    return fmt.Sprintf("%s has entered: %s", c.Name, roomName), true
+}
+
+func (c *Client) leaveRoom(roomName string) {
+    // Return as a no-op here if you didn't give a roomName (you may not have entered a room yet).
+    if roomName == "" {
+        return
+    }
+
+    ChatCache.Mutex.Lock()
+    defer ChatCache.Mutex.Unlock()
+
+    // Re-create the list of clients in the given room, minus whatever client we have in play since they are leaving.
+    prunedList := []*Client{}
+    for _, client := range(ChatCache.Rooms[roomName]) {
+        if c != client {
+            prunedList = append(prunedList, client)
+        }
+    }
+    ChatCache.Rooms[roomName] = prunedList
+
+    /// If the room no longer has anyone in it after this user has been removed then delete it.
+    if len(ChatCache.Rooms[roomName]) == 0 {
+        delete(ChatCache.Rooms, roomName)
+    }
+
+    // I hate to do this in here, but I don't really want to pass roomName up through all these methods and
+    //their associated conditions when 90% of the time it's going to be what's already on the client.  So
+    //leaving this for now.
+    go c.broadcastToRoom(fmt.Sprintf("%s has left %s.", c.Name, roomName), roomName)
+    // TODO - Consider the map version below relying on this data structure
+    //      {<room name>: {<client id>: <client pointer>} }
+    //// Delete this client from the rooms: clients mappings.
+    //if ChatCache.Rooms[roomName][clientName] != nil {
+    //    delete(ChatCache.Rooms[roomName], clientName)
+    //}
+}
+
+func (c *Client) broadcastToRoom(message, roomName string) {
+    // If no one is in the room I'm in then just send it to myself.
+    if len(ChatCache.Rooms[roomName]) < 1 {
+        c.WriteResponse(message, nil)
+    }
+    for _, targetClient := range ChatCache.Rooms[roomName] {
+        targetClient.WriteResponse(message, c.Name)
+    }
 }
 
 func (c *Client) listen() {
@@ -159,8 +284,8 @@ func (c *Client) parseResponse(cmd string) (string, bool) {
     case cmd == "\\leave":
         roomName := c.CurrentRoom
         c.leaveRoom(c.CurrentRoom)
+        c.CurrentRoom = ""  // Set this here because leaveRoom is called from all over
 
-        c.CurrentRoom = ""
         return fmt.Sprintf("You have left room %s", roomName), false
     case cmd == "\\list":  // list the members of your current room
         return c.listMembers(c.CurrentRoom)
@@ -173,138 +298,3 @@ func (c *Client) parseResponse(cmd string) (string, bool) {
     // TODO - Direct message?
     return fmt.Sprintf("Invalid command: `%s`", cmd), false
 }
-
-
-func (c *Client) changeClientName(name string) (string, bool) {
-    msg := fmt.Sprintf("User: %s has become -> %s", c.Name, name)
-    ChatCache.Mutex.Lock()
-    defer ChatCache.Mutex.Unlock()
-
-    // Replace original client name and mapping in our client list with the updated name.
-    ChatCache.Clients[name] = c
-    delete(ChatCache.Clients, c.Name)
-
-    // We can still change this name value after it's been set back in the clients pool since it's a pointer.
-    c.Name = name
-    return msg, true
-}
-
-func (c *Client) displayClientStats() (string, bool) {
-    currentRoom := c.CurrentRoom
-    if currentRoom == "" {
-        currentRoom = "None"
-    }
-    return fmt.Sprintf("\nClient Name: %s\nCurrent Room: %s", c.Name, currentRoom), false
-}
-
-func (c *Client) listRooms() (string, bool) {
-    if len(ChatCache.Rooms) < 1 {
-        return "No rooms yet - make one!", false
-    }
-    roomString := ""
-    for name, members := range(ChatCache.Rooms) {
-        roomString = roomString + fmt.Sprintf("  Room: %s\n  Members:\n", name)
-        for _, c := range members {
-            roomString = roomString + fmt.Sprintf("\t%s\n", c.Name)
-        }
-    }
-    return fmt.Sprintf("\nCurrent rooms: \n%s", roomString), false
-}
-
-func (c *Client) listMembers(roomName string) (string, bool) {
-    if ChatCache.Rooms[roomName] == nil {
-        return fmt.Sprintf("No such room %s!", roomName), false
-    }
-    roomString := ""
-    for _, c := range(ChatCache.Rooms[roomName]) {
-        roomString = roomString + fmt.Sprintf("\t%s\n", c.Name)
-    }
-    return fmt.Sprintf("\nCurrent Members:\n%s", roomString), false
-}
-
-func (c *Client) createRoom(roomName string) (string, bool) {
-    if ChatCache.Rooms[roomName] != nil{
-        return "Room already exists - use `\\join` to join the chat.", false
-    }
-    // Defer first since this since it also locks the mutex and this should run last.
-    // Leave any existing rooms this user is in since you can only be in 1.
-    defer c.leaveRoom(c.CurrentRoom)
-
-    ChatCache.Mutex.Lock()
-    defer ChatCache.Mutex.Unlock()
-
-    log.Printf("Creating Room: %s\n", roomName)
-    ChatCache.Rooms[roomName] = []*Client{c}
-
-    c.CurrentRoom = roomName
-    return fmt.Sprintf("New room created: %s", roomName), false
-}
-
-func (c *Client) joinRoom(roomName string) (string, bool) {
-    if ChatCache.Rooms[roomName] == nil {
-        return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName), false
-    }
-    if c.CurrentRoom == roomName {
-        return fmt.Sprintf("You're already in room %s!", roomName), false
-    }
-    // Defer first since this since it also locks the mutex and this should run last.
-    // Leave any existing rooms this user is in since you can only be in 1.
-    defer c.leaveRoom(c.CurrentRoom)
-
-    ChatCache.Mutex.Lock()
-    defer ChatCache.Mutex.Unlock()
-
-    ChatCache.Rooms[roomName] = append(ChatCache.Rooms[roomName], c)
-
-    c.CurrentRoom = roomName
-    return fmt.Sprintf("%s has entered: %s", c.Name, roomName), true
-}
-
-func (c *Client) leaveRoom(roomName string) {
-    // Return as a no-op here if you didn't give a roomName (you may not have entered a room yet).
-    if roomName == "" {
-        return
-    }
-
-    ChatCache.Mutex.Lock()
-    defer ChatCache.Mutex.Unlock()
-
-    // Re-create the list of clients in the given room, minus whatever client we have in play since they are leaving.
-    prunedList := []*Client{}
-    for _, c := range(ChatCache.Rooms[roomName]) {
-        if c != c {
-            prunedList = append(prunedList, c)
-        }
-    }
-    ChatCache.Rooms[roomName] = prunedList
-
-    /// If the room no longer has anyone in it after this user has been removed then delete it.
-    if len(ChatCache.Rooms[roomName]) == 0 {
-        delete(ChatCache.Rooms, roomName)
-    }
-
-    // I hate to do this in here, but I don't really want to pass roomName up through all these methods and
-    //their associated conditions when 90% of the time it's going to be what's already on the client.  So
-    //leaving this for now.
-    go c.broadcastToRoom(fmt.Sprintf("%s has left the room %s.", c.Name, roomName), roomName)
-
-    // TODO - Consider the map version below relying on this data structure
-    //      {<room name>: {<client name>: <client pointer>} }
-    //  I'd probably need a client Id or something static to use as a key instead of the client.name to deal with this,
-    //  since the names can change and that could leave you in 2 rooms.
-    //// Delete this client from the rooms: clients mappings.
-    //if ChatCache.Rooms[roomName][clientName] != nil {
-    //    delete(ChatCache.Rooms[roomName], clientName)
-    //}
-}
-
-func (c *Client) broadcastToRoom(message, roomName string) {
-    // If no one is in the room I'm in then just send it to myself.
-    if len(ChatCache.Rooms[roomName]) < 1 {
-        c.WriteResponse(message, nil)
-    }
-    for _, targetClient := range ChatCache.Rooms[roomName] {
-        targetClient.WriteResponse(message, c.Name)
-    }
-}
-
