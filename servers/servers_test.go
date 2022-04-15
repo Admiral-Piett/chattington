@@ -10,11 +10,12 @@ import (
     "github.com/stretchr/testify/assert"
     "net"
     "testing"
+    "time"
 )
 
 func Test_NewServer_success(t *testing.T) {
     monkey.Patch(net.Listen, func(a, b string) (net.Listener, error) {
-        return &mocks.NetListerMock{}, nil
+        return &mocks.NetListenerMock{}, nil
     })
     defer monkey.Unpatch(net.Listen)
     s, err := servers.NewServer()
@@ -25,12 +26,12 @@ func Test_NewServer_success(t *testing.T) {
 
 func Test_NewServer_net_listen_error(t *testing.T) {
     monkey.Patch(net.Listen, func(a, b string) (net.Listener, error) {
-        return &mocks.NetListerMock{}, fmt.Errorf("boom")
+        return &mocks.NetListenerMock{}, fmt.Errorf("boom")
     })
     defer monkey.Unpatch(net.Listen)
     _, err := servers.NewServer()
 
-    assert.Nil(t, err)
+    assert.Error(t, err)
 }
 
 func Test_Close_success(t *testing.T) {
@@ -41,25 +42,35 @@ func Test_Close_success(t *testing.T) {
 }
 
 func Test_Start_success(t *testing.T) {
-    l := &mocks.NetListerMock{}
-    m, _ := servers.NewServer()
-    m.Listener = l
-
-    c := &mocks.ClientMock{
-        Conn: &mocks.NetConnMock{},
-        Name: "test",
+    l := &mocks.NetListenerMock{}
+    m := servers.Server{
+        Listener: l,
     }
 
-    m.Start()
+    patchCalled := false
+    monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn) {
+        patchCalled = true
+    })
+    defer monkey.Unpatch(net.Listen)
+
+    go m.Start()
+    time.Sleep(1 * time.Second)  //TODO - find something more elegant than this
 
     assert.True(t, l.AcceptCalled)
+    assert.True(t, patchCalled)
 }
 
 func Test_Start_Accept_raises_error(t *testing.T) {
-    m := mocks.ServerMock{}
-    m.Close()
+    l := &mocks.NetListenerMock{}
+    l.AcceptMock = func() (net.Conn, error) {
+        return &mocks.NetConnMock{}, fmt.Errorf("boom")
+    }
+    m := servers.Server{
+        Listener: l,
+    }
+    err := m.Start()
 
-    assert.True(t, m.CloseCalled)
+    assert.Error(t, err)
 }
 
 

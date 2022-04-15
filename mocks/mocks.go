@@ -53,14 +53,14 @@ func (m *NetAddrMock) String() string {
     return ""
 }
 
-type NetListerMock struct {
+type NetListenerMock struct {
     AcceptCalled bool
     AcceptMock func() (net.Conn, error)
     CloseMock func() error
     AddrMock func() net.Addr
 }
 
-func (m *NetListerMock) Accept() (net.Conn, error) {
+func (m *NetListenerMock) Accept() (net.Conn, error) {
     m.AcceptCalled = true
     if m.AcceptMock != nil {
         return m.AcceptMock()
@@ -68,14 +68,14 @@ func (m *NetListerMock) Accept() (net.Conn, error) {
     return &NetConnMock{}, nil
 }
 
-func (m *NetListerMock) Close() error {
+func (m *NetListenerMock) Close() error {
     if m.CloseMock != nil {
         return m.CloseMock()
     }
     return nil
 }
 
-func (m *NetListerMock) Addr() net.Addr {
+func (m *NetListenerMock) Addr() net.Addr {
     if m.AddrMock != nil {
         return m.AddrMock()
     }

@@ -12,5 +12,8 @@ func main() {
     }
     defer s.Close()
 
-    s.Start()
+    err = s.Start()
+    if err != nil {
+        log.Fatal(err)
+    }
 }
