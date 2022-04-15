@@ -4,6 +4,7 @@ import (
     "fmt"
     "github.com/Admiral-Piett/chat-telnet/clients"
     "github.com/Admiral-Piett/chat-telnet/mocks"
+    "github.com/stretchr/testify/assert"
     "reflect"
     "strings"
     "testing"
@@ -22,15 +23,9 @@ func Test_WriteString_success(t *testing.T) {
 
     err := c.WriteString("test")
 
-    if err != nil {
-        t.Errorf("Unexpected error thrown: %s", err)
-    }
-    if m.WriteCalled != true {
-       t.Errorf("Expected Write() to have been called")
-    }
-    if reflect.TypeOf(name) != reflect.TypeOf("") {
-        t.Errorf("Expected name to be of type `int`")
-    }
+    assert.Nil(t, err)
+    assert.True(t, m.WriteCalled)
+    assert.IsType(t, "", name)
 }
 
 func Test_WriteString_returns_error(t *testing.T) {
@@ -42,9 +37,7 @@ func Test_WriteString_returns_error(t *testing.T) {
     c, _ := clients.NewClient(m)
     err := c.WriteString("test")
 
-    if err == nil {
-       t.Errorf("Expected error to be thrown")
-    }
+    assert.Error(t, err)
 }
 
 func Test_WriteResponse_success_no_sendingClient(t *testing.T) {
@@ -53,9 +46,7 @@ func Test_WriteResponse_success_no_sendingClient(t *testing.T) {
 
     err := c.WriteResponse("test", nil)
 
-    if err != nil {
-        t.Errorf("Unexpected error thrown: %s", err)
-    }
+    assert.Nil(t, err)
     if !strings.HasSuffix(string(m.CalledWith), "> test\n") {
        t.Errorf("Expected Write() to have ended with `> test\\n`, NOT: %s", string(m.CalledWith))
     }
@@ -67,12 +58,8 @@ func Test_WriteResponse_success_with_sendingClient(t *testing.T) {
 
     err := c.WriteResponse("test", "HanSolo")
 
-    if err != nil {
-        t.Errorf("Unexpected error thrown: %s", err)
-    }
-    if string(m.CalledWith) != "HanSolo: test\n" {
-        t.Errorf("Expected Write() to have ended with `: test\\n`, NOT: %s", string(m.CalledWith))
-    }
+    assert.Nil(t, err)
+    assert.Equal(t, "HanSolo: test\n", m.CalledWith)
 }
 
 func Test_WriteResponse_returns_error(t *testing.T) {
@@ -85,21 +72,15 @@ func Test_WriteResponse_returns_error(t *testing.T) {
 
     err := c.WriteResponse("test", "HanSolo")
 
-    if err == nil {
-        t.Errorf("Expected error to be thrown")
-    }
+    assert.Error(t, err)
 }
 
 func Test_Read_success(t *testing.T) {
     m := &mocks.ReaderMock{}
     _, err := clients.Read(m)
 
-    if err != nil {
-        t.Errorf("Unexpected error thrown: %s", err)
-    }
-    if m.ReadStringCalled != true {
-        t.Errorf("Expected ReadString() to be called")
-    }
+    assert.Error(t, err)
+    assert.True(t, m.ReadStringCalled)
 }
 
 func Test_Read_returns_error(t *testing.T) {
@@ -109,10 +90,8 @@ func Test_Read_returns_error(t *testing.T) {
         },
     }
     s, err := clients.Read(m)
-    if m.ReadStringCalled != true {
-        t.Errorf("Expected ReadString() to be called")
-    }
-    if s != "" || err == nil {
-        t.Errorf("Expected error to be thrown")
-    }
+
+    assert.Error(t, err)
+    assert.Empty(t, s)
+    assert.True(t, m.ReadStringCalled)
 }

@@ -12,7 +12,7 @@ import (
 )
 
 type Server struct {
-    listener net.Listener
+    Listener net.Listener
     clients  map[string]*clients.Client   // Currently connected clients.  {<client.name> : *Client}
     rooms    map[string][]*clients.Client // Running chat rooms.  {<room_name> : [*Client, ...]}
     mutex    *sync.Mutex
@@ -21,10 +21,10 @@ type Server struct {
 func NewServer() (Server, error) {
     l, err := net.Listen("tcp", ":2000")
     if err != nil {
-        log.Fatal(err)
+        return Server{}, err
     }
     server := Server{
-        listener: l,
+        Listener: l,
         clients:  map[string]*clients.Client{},
         rooms:    map[string][]*clients.Client{},
         mutex:    &sync.Mutex{},
@@ -33,14 +33,14 @@ func NewServer() (Server, error) {
 }
 
 func (s *Server) Close() {
-    s.listener.Close()
+    s.Listener.Close()
 }
 
 //TODO - handle all fatal errors
 func (s *Server) Start() {
     for {
         // Wait for a connection.
-        conn, err := s.listener.Accept()
+        conn, err := s.Listener.Accept()
         if err != nil {
             log.Fatal(err)
         }
@@ -48,6 +48,23 @@ func (s *Server) Start() {
         c := s.createClient(conn)
         go s.listen(c)
     }
+}
+
+func (s *Server) createClient(conn net.Conn) *clients.Client {
+    log.Printf("Accepting new connection from address %v, total clients: %v\n", conn.RemoteAddr().String(), len(s.clients)+1)
+
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+
+    c, name := clients.NewClient(conn)
+
+
+    s.clients[name] = c
+
+    nameInstructions := fmt.Sprintf("\nWe've set your user name with a default - `%s`\nIf you'd like to reset it, please use the '\\name' command.\n\n", name)
+
+    c.WriteString(nameInstructions)
+    return c
 }
 
 // Here we will handle any commands and return anything we want to send back to the client.  If we want this to
@@ -87,21 +104,6 @@ func (s *Server) parseResponse(cmd string, c *clients.Client) (string, bool) {
     // TODO - \\create-private - private room??? - How would that even work?
     // TODO - Direct message?
     return fmt.Sprintf("Invalid command: `%s`", cmd), false
-}
-
-func (s *Server) createClient(conn net.Conn) *clients.Client {
-    log.Printf("Accepting new connection from address %v, total clients: %v\n", conn.RemoteAddr().String(), len(s.clients)+1)
-
-    s.mutex.Lock()
-    defer s.mutex.Unlock()
-
-    c, name := clients.NewClient(conn)
-    s.clients[name] = c
-
-    nameInstructions := fmt.Sprintf("\nWe've set your user name with a default - `%s`\nIf you'd like to reset it, please use the '\\name' command.\n\n", name)
-
-    c.WriteString(nameInstructions)
-    return c
 }
 
 func (s *Server) changeClientName(name string, c *clients.Client) (string, bool) {
