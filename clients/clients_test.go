@@ -11,6 +11,7 @@ import (
    "os"
    "sync"
    "testing"
+    "time"
 )
 
 func TestMain(m *testing.M) {
@@ -247,16 +248,13 @@ func Test_joinRoom_already_in_room(t *testing.T) {
 }
 
 func Test_leaveRoom_success(t *testing.T) {
-   w2 := &mocks.IoWriterMock{WithWaitGroup: true}
+   w2 := &mocks.IoWriterMock{}
    c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: &mocks.IoWriterMock{}}
    c2 := &Client{Id: "456", Name: "Chewbacca", CurrentRoom: "broom", Writer: w2}
    ChatCache.Rooms["broom"] = []*Client{c1, c2}
 
-   w2.Wg.Add(1)
-
    c1.leaveRoom("broom")
-
-   w2.Wg.Wait()
+   time.Sleep(1 * time.Second)
 
    assert.Equal(t, []*Client{c2}, ChatCache.Rooms["broom"])
    assert.Equal(t, "Han Solo: Han Solo has left broom.\n", string(w2.WriteCalledWith))
@@ -283,39 +281,34 @@ func Test_leaveRoom_empties_out_room_destroys_room(t *testing.T) {
 }
 
 func Test_broadcastToRoom_success(t *testing.T) {
-   w1 := &mocks.IoWriterMock{WithWaitGroup: true}
-   w2 := &mocks.IoWriterMock{WithWaitGroup: true}
+   w1 := &mocks.IoWriterMock{}
+   w2 := &mocks.IoWriterMock{}
    c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: w1}
    c2 := &Client{Id: "456", Name: "Chewbacca", CurrentRoom: "broom", Writer: w2}
    ChatCache.Rooms["broom"] = []*Client{c1, c2}
 
-   w1.Wg.Add(1)
-   w2.Wg.Add(1)
-
    c1.broadcastToRoom("test", "broom")
-
-   w1.Wg.Wait()
-   w2.Wg.Wait()
 
    assert.Equal(t, "Han Solo> test\n", string(w1.WriteCalledWith))
    assert.Equal(t, "Han Solo: test\n", string(w2.WriteCalledWith))
 }
 
 func Test_broadcastToRoom_alone_write_to_self(t *testing.T) {
-  w1 := &mocks.IoWriterMock{WithWaitGroup: true}
+  w1 := &mocks.IoWriterMock{}
   c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: w1}
   ChatCache.Rooms["broom"] = []*Client{c1}
 
-  w1.Wg.Add(1)
-
   c1.broadcastToRoom("test", "broom")
-
-  w1.Wg.Wait()
 
   assert.Equal(t, "Han Solo> test\n", string(w1.WriteCalledWith))
 }
 
 func Test_parseResponse_one_client_required(t *testing.T) {
+    ChatCache = &ChatMeta{  // Best effort to reset the cache
+        Clients:  map[string]*Client{},
+        Rooms:    map[string][]*Client{},
+        Mutex:    &sync.Mutex{},
+    }
    var tests = []struct {
      input string
      expectedStr string
@@ -381,6 +374,8 @@ func Test_listen_msg_broadcasts_to_room(t *testing.T) {
   ChatCache.Rooms["broom"] = []*Client{c1, c2}
   c1.listen()
 
+    time.Sleep(1 * time.Second)
+
   assert.True(t, m1.WriteCalled)
   assert.True(t, m2.WriteCalled)
   assert.Equal(t, "Han Solo> test\n", string(m1.WriteCalledWith))
@@ -435,6 +430,8 @@ func Test_listen_cmd_broadcasts_to_room(t *testing.T) {
    ChatCache.Clients[c2.Id] = c2
    ChatCache.Rooms["broom"] = []*Client{c1, c2}
    c1.listen()
+
+    time.Sleep(1 * time.Second)  // TODO - add wait groups to this
 
    assert.True(t, m1.WriteCalled)
    assert.True(t, m2.WriteCalled)

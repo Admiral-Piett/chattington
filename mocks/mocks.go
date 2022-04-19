@@ -3,7 +3,6 @@ package mocks
 import (
     "bufio"
     "net"
-    "sync"
     "time"
 )
 
@@ -117,8 +116,6 @@ func (m *ReaderMock)ReadString(delim byte) (string, error) {
 }
 
 type IoWriterMock struct {
-    WithWaitGroup bool
-    Wg sync.WaitGroup
     WriteCalledWith []byte
     WriteCalled bool
     WriteMock       func(p []byte) (n int, err error)
@@ -129,9 +126,6 @@ func (m *IoWriterMock)Write(p []byte) (n int, err error) {
     m.WriteCalled = true
     if m.WriteMock != nil {
         return m.WriteMock(p)
-    }
-    if m.WithWaitGroup {
-        m.Wg.Done()
     }
     return 0, nil
 }
