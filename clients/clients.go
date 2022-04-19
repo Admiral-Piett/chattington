@@ -266,7 +266,7 @@ func (c *Client) listen() {
 //error messages privately, etc.
 func (c *Client) parseResponse(cmd string) (string, bool) {
     value := ""
-    // Route any commands to their relevant methods
+    // Attempt to split the command from the proceeding value, determined by a space (if applicable)
     cmdIndex := strings.IndexByte(cmd, ' ')
     if cmdIndex > 0 {
         value = strings.TrimSpace(cmd[cmdIndex:])
@@ -279,8 +279,8 @@ func (c *Client) parseResponse(cmd string) (string, bool) {
         return c.createRoom(value)
     case cmd == "\\join" && value != "":
         return c.joinRoom(value)
-    case cmd == "\\list" && value != "":
-        return c.listRooms()
+    case cmd == "\\list" && value != "":  // list people in another room
+        return c.listMembers(value)
     case cmd == "\\leave":
         roomName := c.CurrentRoom
         c.leaveRoom(c.CurrentRoom)

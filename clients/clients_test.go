@@ -1,9 +1,13 @@
 package clients
 
 import (
+   "bou.ke/monkey"
+   "bufio"
    "fmt"
+   "github.com/Admiral-Piett/chat-telnet/interfaces"
    "github.com/Admiral-Piett/chat-telnet/mocks"
    "github.com/stretchr/testify/assert"
+   "io"
    "os"
    "sync"
    "testing"
@@ -243,7 +247,7 @@ func Test_joinRoom_already_in_room(t *testing.T) {
 }
 
 func Test_leaveRoom_success(t *testing.T) {
-   w2 := &mocks.IoWriterMock{}
+   w2 := &mocks.IoWriterMock{WithWaitGroup: true}
    c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: &mocks.IoWriterMock{}}
    c2 := &Client{Id: "456", Name: "Chewbacca", CurrentRoom: "broom", Writer: w2}
    ChatCache.Rooms["broom"] = []*Client{c1, c2}
@@ -279,8 +283,8 @@ func Test_leaveRoom_empties_out_room_destroys_room(t *testing.T) {
 }
 
 func Test_broadcastToRoom_success(t *testing.T) {
-   w1 := &mocks.IoWriterMock{}
-   w2 := &mocks.IoWriterMock{}
+   w1 := &mocks.IoWriterMock{WithWaitGroup: true}
+   w2 := &mocks.IoWriterMock{WithWaitGroup: true}
    c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: w1}
    c2 := &Client{Id: "456", Name: "Chewbacca", CurrentRoom: "broom", Writer: w2}
    ChatCache.Rooms["broom"] = []*Client{c1, c2}
@@ -298,17 +302,169 @@ func Test_broadcastToRoom_success(t *testing.T) {
 }
 
 func Test_broadcastToRoom_alone_write_to_self(t *testing.T) {
-   w1 := &mocks.IoWriterMock{}
-   c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: w1}
-   ChatCache.Rooms["broom"] = []*Client{c1}
+  w1 := &mocks.IoWriterMock{WithWaitGroup: true}
+  c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: w1}
+  ChatCache.Rooms["broom"] = []*Client{c1}
 
-   w1.Wg.Add(1)
+  w1.Wg.Add(1)
 
-   c1.broadcastToRoom("test", "broom")
+  c1.broadcastToRoom("test", "broom")
 
-   w1.Wg.Wait()
+  w1.Wg.Wait()
 
-   assert.Equal(t, "Han Solo> test\n", string(w1.WriteCalledWith))
+  assert.Equal(t, "Han Solo> test\n", string(w1.WriteCalledWith))
 }
 
-// TODO - HERE - Add listen and parseResponse tests
+func Test_parseResponse_one_client_required(t *testing.T) {
+   var tests = []struct {
+     input string
+     expectedStr string
+     expectedBool bool
+   }{
+     {"\\name Lando Calrissian", "User: Han Solo has become -> Lando Calrissian", true},
+     {"\\create broom", "New room created: broom", false},
+     {"\\list", "\nCurrent Members:\n\tLando Calrissian\n", false},
+     {"\\list-rooms", "\nCurrent rooms: \n  Room: broom\n  Members:\n\tLando Calrissian\n", false},
+     {"\\whoami", "\nClient Name: Lando Calrissian\nCurrent Room: broom", false},
+     {"\\leave", "You have left room broom", false},
+     {"\\invalid-command", "Invalid command: `\\invalid-command`", false},
+   }
+   c := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "", Writer: &mocks.IoWriterMock{}}
+
+   for _, tt := range tests {
+      actualStr, actualBool := c.parseResponse(tt.input)
+      assert.Equal(t, tt.expectedStr, actualStr)
+      assert.Equal(t, tt.expectedBool, actualBool)
+   }
+}
+
+func Test_parseResponse_more_than_one_client_required(t *testing.T) {
+  c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: &mocks.IoWriterMock{}}
+  c2 := &Client{Id: "123", Name: "Leia Organa", CurrentRoom: "vroom", Writer: &mocks.IoWriterMock{}}
+
+  ChatCache.Rooms["broom"] = []*Client{c1}
+  ChatCache.Rooms["vroom"] = []*Client{c2}
+
+  actualStr1, actualBool1 := c1.parseResponse("\\list vroom")
+  actualStr2, actualBool2 := c2.parseResponse("\\list broom")
+
+  actualStr3, actualBool3 := c2.parseResponse("\\join broom")
+
+  assert.Equal(t, "\nCurrent Members:\n\tLeia Organa\n", actualStr1)
+  assert.False(t, actualBool1)
+  assert.Equal(t, "\nCurrent Members:\n\tHan Solo\n", actualStr2)
+  assert.False(t, actualBool2)
+
+  assert.Equal(t, "Leia Organa has entered: broom", actualStr3)
+  assert.True(t, actualBool3)
+}
+
+func Test_listen_msg_broadcasts_to_room(t *testing.T) {
+  count := 0
+  monkey.Patch(Read, func(a interfaces.AbstractBufioReader) (string, error) {
+     if count == 0 {
+        count ++
+        return "test", nil
+     } else {
+        return "", io.EOF  //Also secretly testing that io.EOF kills the process
+     }
+  })
+  defer monkey.Unpatch(bufio.NewReader)
+
+  m1 := &mocks.IoWriterMock{}
+  m2 := &mocks.IoWriterMock{}
+
+  c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: m1, Conn: &mocks.NetConnMock{}}
+  c2 := &Client{Id: "456", Name: "Leia Organa", CurrentRoom: "broom", Writer: m2, Conn: &mocks.NetConnMock{}}
+  ChatCache.Clients[c1.Id] = c1
+  ChatCache.Clients[c2.Id] = c2
+  ChatCache.Rooms["broom"] = []*Client{c1, c2}
+  c1.listen()
+
+  assert.True(t, m1.WriteCalled)
+  assert.True(t, m2.WriteCalled)
+  assert.Equal(t, "Han Solo> test\n", string(m1.WriteCalledWith))
+  assert.Equal(t, "Han Solo: test\n", string(m2.WriteCalledWith))
+}
+
+func Test_listen_msg_sends_only_to_self(t *testing.T) {
+   count := 0
+   monkey.Patch(Read, func(a interfaces.AbstractBufioReader) (string, error) {
+      if count == 0 {
+         count ++
+         return "test", nil
+      } else {
+         return "", io.EOF
+      }
+   })
+   defer monkey.Unpatch(bufio.NewReader)
+
+   m1 := &mocks.IoWriterMock{}
+   m2 := &mocks.IoWriterMock{}
+
+   c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "", Writer: m1, Conn: &mocks.NetConnMock{}}
+   c2 := &Client{Id: "456", Name: "Leia Organa", CurrentRoom: "broom", Writer: m2, Conn: &mocks.NetConnMock{}}
+   ChatCache.Clients[c1.Id] = c1
+   ChatCache.Clients[c2.Id] = c2
+   ChatCache.Rooms["broom"] = []*Client{c1, c2}
+   c1.listen()
+
+   assert.True(t, m1.WriteCalled)
+   assert.False(t, m2.WriteCalled)
+   assert.Equal(t, "Han Solo> test\n", string(m1.WriteCalledWith))
+}
+
+func Test_listen_cmd_broadcasts_to_room(t *testing.T) {
+   count := 0
+   monkey.Patch(Read, func(a interfaces.AbstractBufioReader) (string, error) {
+      if count == 0 {
+         count ++
+         return "\\name LukeSkywalker", nil
+      } else {
+         return "", io.EOF  //Also secretly testing that io.EOF kills the process
+      }
+   })
+   defer monkey.Unpatch(bufio.NewReader)
+
+   m1 := &mocks.IoWriterMock{}
+   m2 := &mocks.IoWriterMock{}
+
+   c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: m1, Conn: &mocks.NetConnMock{}}
+   c2 := &Client{Id: "456", Name: "Leia Organa", CurrentRoom: "broom", Writer: m2, Conn: &mocks.NetConnMock{}}
+   ChatCache.Clients[c1.Id] = c1
+   ChatCache.Clients[c2.Id] = c2
+   ChatCache.Rooms["broom"] = []*Client{c1, c2}
+   c1.listen()
+
+   assert.True(t, m1.WriteCalled)
+   assert.True(t, m2.WriteCalled)
+   assert.Equal(t, "LukeSkywalker> User: Han Solo has become -> LukeSkywalker\n", string(m1.WriteCalledWith))
+   assert.Equal(t, "LukeSkywalker: User: Han Solo has become -> LukeSkywalker\n", string(m2.WriteCalledWith))
+}
+
+func Test_listen_cmd_sends_only_to_self(t *testing.T) {
+   count := 0
+   monkey.Patch(Read, func(a interfaces.AbstractBufioReader) (string, error) {
+      if count == 0 {
+         count ++
+         return "\\list", nil
+      } else {
+         return "", io.EOF
+      }
+   })
+   defer monkey.Unpatch(bufio.NewReader)
+
+   m1 := &mocks.IoWriterMock{}
+   m2 := &mocks.IoWriterMock{}
+
+   c1 := &Client{Id: "123", Name: "Han Solo", CurrentRoom: "broom", Writer: m1, Conn: &mocks.NetConnMock{}}
+   c2 := &Client{Id: "456", Name: "Leia Organa", CurrentRoom: "broom", Writer: m2, Conn: &mocks.NetConnMock{}}
+   ChatCache.Clients[c1.Id] = c1
+   ChatCache.Clients[c2.Id] = c2
+   ChatCache.Rooms["broom"] = []*Client{c1, c2}
+   c1.listen()
+
+   assert.True(t, m1.WriteCalled)
+   assert.False(t, m2.WriteCalled)
+   assert.Equal(t, "Han Solo> \nCurrent Members:\n\tHan Solo\n\tLeia Organa\n\n", string(m1.WriteCalledWith))
+}

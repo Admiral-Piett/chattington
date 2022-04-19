@@ -102,12 +102,14 @@ func (m *NetConnMock) SetWriteDeadline(t time.Time) error {
 
 type ReaderMock struct {
     ReadStringCalled bool
+    ReadStringCalledWith byte
     bufio.Reader
     ReadMock func(delim byte) (string, error)
 }
 
 func (m *ReaderMock)ReadString(delim byte) (string, error) {
     m.ReadStringCalled = true
+    m.ReadStringCalledWith = delim
     if m.ReadMock != nil {
         return m.ReadMock(delim)
     }
@@ -115,6 +117,7 @@ func (m *ReaderMock)ReadString(delim byte) (string, error) {
 }
 
 type IoWriterMock struct {
+    WithWaitGroup bool
     Wg sync.WaitGroup
     WriteCalledWith []byte
     WriteCalled bool
@@ -127,6 +130,8 @@ func (m *IoWriterMock)Write(p []byte) (n int, err error) {
     if m.WriteMock != nil {
         return m.WriteMock(p)
     }
-    m.Wg.Done()
+    if m.WithWaitGroup {
+        m.Wg.Done()
+    }
     return 0, nil
 }
