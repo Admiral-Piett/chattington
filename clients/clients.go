@@ -4,39 +4,27 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/Admiral-Piett/chat-telnet/interfaces"
+	cache2 "github.com/patrickmn/go-cache"
 	"io"
 	"log"
 	"strings"
-	"sync"
 	"time"
 )
 
-// TODO - explore a cache like redis or BadgerDB?
-type ChatMeta struct {
-	Clients map[string]*Client   // Currently connected clients.  {<client.name> : *Client}
-	Rooms   map[string][]*Client // Running chat rooms.  {<room_name> : [*Client, ...]}
-	Mutex   *sync.Mutex
-}
-
-var ChatCache = &ChatMeta{
-	Clients: map[string]*Client{},
-	Rooms:   map[string][]*Client{},
-	Mutex:   &sync.Mutex{},
-}
+var CLIENTS = "clients"
+var ROOMS = "rooms"
 
 type Client struct {
 	Writer      interfaces.AbstractIoWriter
 	Conn        interfaces.AbstractNetConn
+	Cache       interfaces.AbstractCache // TODO - explore a cache like redis or BadgerDB?
 	Name        string
 	CurrentRoom string
 	Id          string
 }
 
-func GenerateNewClient(conn interfaces.AbstractNetConn) {
-	log.Printf("Accepting new connection from address %v, total clients: %v\n", conn.RemoteAddr().String(), len(ChatCache.Clients)+1)
-
-	ChatCache.Mutex.Lock()
-	defer ChatCache.Mutex.Unlock()
+func GenerateNewClient(conn interfaces.AbstractNetConn, cache interfaces.AbstractCache) error {
+	log.Printf("Accepting new connection from address %v\n", conn.RemoteAddr().String())
 
 	// Generate a semi-random id and initial name for ourselves, using a time stamp.  For now, this is "unique"
 	//  enough since our users are not logging on so quickly that they should collide.
@@ -47,13 +35,36 @@ func GenerateNewClient(conn interfaces.AbstractNetConn) {
 		Name:        id,
 		CurrentRoom: "",
 		Id:          id,
+		Cache:       cache,
 	}
 
-	ChatCache.Clients[id] = client
-	nameInstructions := fmt.Sprintf("\nWe've set your user name with a default - `%s`\nIf you'd like to reset it, please use the '\\name' comman\n\n", id)
+	err := client.addClientToCache()
+	if err != nil {
+		client.WriteString(fmt.Sprintf("ERROR: %s\n", err))
+		return err
+	}
+	intro := `
+Welcome to Chattington!
 
-	client.WriteString(nameInstructions)
+Feel free to join any chat rooms you see, or create a room instead, using the available commands below.
+
+Available Commands:
+=====
+\name 	<user name> 	: Change your user name to the <user name> supplied
+\create <room name> 	: Create and join a new chat room with the <room name> supplied
+\join 	<room name> 	: Join an existing chat room with the <room name> supplied
+\list 	<room name>		: List members in the chat room named after the <room name> supplied
+\leave					: Leave the room you are currently in
+\list 					: List members in the room you're currently in
+\list-rooms				: List all the available rooms and their members
+\whoami					: List your name and what room you're currently in
+\exit					: Exit server and terminate connection
+`
+	nameInstructions := fmt.Sprintf("\n\nNOTE: Your user name has been automatically set to `%s`\nIf you'd like to reset it, please use the '\\name' command.\n\n", id)
+
+	client.WriteString(intro + nameInstructions)
 	go client.listen()
+	return nil
 }
 
 func (c *Client) WriteString(msg string) error {
@@ -65,11 +76,12 @@ func (c *Client) WriteString(msg string) error {
 func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
 	// Using `sendingClient` you can send in the string name who the sender of the message is, if it's `nil` we'll
 	//  or the same as the target client (`c`) then we can format the response as i.
+	now := time.Now().Unix()
 	prefix := ""
 	if sendingClient == nil || sendingClient == c.Name {
-		prefix = fmt.Sprintf("%s>", c.Name)
+		prefix = fmt.Sprintf("%d: %s>", now, c.Name)
 	} else {
-		prefix = fmt.Sprintf("%s:", sendingClient)
+		prefix = fmt.Sprintf("%d: %s:", now, sendingClient)
 	}
 	// Add chat room response formatting
 	msg = fmt.Sprintf("%s %s\n", prefix, msg)
@@ -91,19 +103,17 @@ func Read(r interfaces.AbstractBufioReader) (string, error) {
 }
 
 func (c *Client) removeConnection() {
-	ChatCache.Mutex.Lock()
-	defer ChatCache.Mutex.Unlock()
-
-	delete(ChatCache.Clients, c.Id)
-	log.Printf("Removed connection %v from pool, total clients: %v\n", c.Conn.RemoteAddr().String(), len(ChatCache.Clients))
+	c.removeClientFromCache()
+	c.Conn.Close()
+	log.Printf("Removed connection %v from pool\n", c.Conn.RemoteAddr().String())
 }
 
 func (c *Client) changeClientName(name string) (string, bool) {
 	msg := fmt.Sprintf("User: %s has become -> %s", c.Name, name)
-	ChatCache.Mutex.Lock()
-	defer ChatCache.Mutex.Unlock()
 
 	c.Name = name
+	c.updateClientInCache()
+	// Overwrite this user in the cache so all users can see it.
 	return msg, true
 }
 
@@ -116,11 +126,12 @@ func (c *Client) displayClientStats() (string, bool) {
 }
 
 func (c *Client) listRooms() (string, bool) {
-	if len(ChatCache.Rooms) < 1 {
+	rooms := c.getAllRoomsFromCache()
+	if len(rooms) < 1 {
 		return "No rooms yet - make one!", false
 	}
 	roomString := ""
-	for name, members := range ChatCache.Rooms {
+	for name, members := range rooms {
 		roomString = roomString + fmt.Sprintf("  Room: %s\n  Members:\n", name)
 		for _, c := range members {
 			roomString = roomString + fmt.Sprintf("\t%s\n", c.Name)
@@ -130,36 +141,36 @@ func (c *Client) listRooms() (string, bool) {
 }
 
 func (c *Client) listMembers(roomName string) (string, bool) {
-	if ChatCache.Rooms[roomName] == nil {
+	room, found := c.getRoomFromCacheByName(roomName)
+	if !found {
 		return fmt.Sprintf("No such room %s!", roomName), false
 	}
 	roomString := ""
-	for _, c := range ChatCache.Rooms[roomName] {
+	for _, c := range room {
 		roomString = roomString + fmt.Sprintf("\t%s\n", c.Name)
 	}
 	return fmt.Sprintf("\nCurrent Members:\n%s", roomString), false
 }
 
 func (c *Client) createRoom(roomName string) (string, bool) {
-	if ChatCache.Rooms[roomName] != nil {
+	_, found := c.getRoomFromCacheByName(roomName)
+	if found {
 		return "Room already exists - use `\\join` to join the chat.", false
 	}
 	// Defer first since this since it also locks the mutex and this should run last.
 	// Leave any existing rooms this user is in since you can only be in 1.
 	defer c.leaveRoom(c.CurrentRoom)
 
-	ChatCache.Mutex.Lock()
-	defer ChatCache.Mutex.Unlock()
-
 	log.Printf("Creating Room: %s\n", roomName)
-	ChatCache.Rooms[roomName] = []*Client{c}
-
 	c.CurrentRoom = roomName
+	c.updateRoomInCache(roomName, []*Client{c})
+
 	return fmt.Sprintf("New room created: %s", roomName), false
 }
 
 func (c *Client) joinRoom(roomName string) (string, bool) {
-	if ChatCache.Rooms[roomName] == nil {
+	room, found := c.getRoomFromCacheByName(roomName)
+	if !found {
 		return fmt.Sprintf("Room `%s` doesn't exist - try creating it with `\\create`", roomName), false
 	}
 	if c.CurrentRoom == roomName {
@@ -169,12 +180,10 @@ func (c *Client) joinRoom(roomName string) (string, bool) {
 	// Leave any existing rooms this user is in since you can only be in 1.
 	defer c.leaveRoom(c.CurrentRoom)
 
-	ChatCache.Mutex.Lock()
-	defer ChatCache.Mutex.Unlock()
-
-	ChatCache.Rooms[roomName] = append(ChatCache.Rooms[roomName], c)
-
 	c.CurrentRoom = roomName
+
+	room = append(room, c)
+	c.updateRoomInCache(roomName, room)
 	return fmt.Sprintf("%s has entered: %s", c.Name, roomName), true
 }
 
@@ -184,21 +193,24 @@ func (c *Client) leaveRoom(roomName string) {
 		return
 	}
 
-	ChatCache.Mutex.Lock()
-	defer ChatCache.Mutex.Unlock()
-
+	room, found := c.getRoomFromCacheByName(roomName)
+	// If this room doesn't exist then just return as a no-op here
+	if !found {
+		return
+	}
 	// Re-create the list of clients in the given room, minus whatever client we have in play since they are leaving.
 	prunedList := []*Client{}
-	for _, client := range ChatCache.Rooms[roomName] {
+	for _, client := range room {
 		if c != client {
 			prunedList = append(prunedList, client)
 		}
 	}
-	ChatCache.Rooms[roomName] = prunedList
 
 	/// If the room no longer has anyone in it after this user has been removed then delete it.
-	if len(ChatCache.Rooms[roomName]) == 0 {
-		delete(ChatCache.Rooms, roomName)
+	if len(prunedList) == 0 {
+		c.deleteRoomFromCache(roomName)
+	} else {
+		c.updateRoomInCache(roomName, prunedList)
 	}
 
 	// I hate to do this in here, but I don't really want to pass roomName up through all these methods and
@@ -213,12 +225,19 @@ func (c *Client) leaveRoom(roomName string) {
 	//}
 }
 
+func (c *Client) directMessage(targetClient string) (string, bool) {
+	return "", false
+}
+
 func (c *Client) broadcastToRoom(message, roomName string) {
+	// We don't care if the room was found or not, since we'll detect and empty room (or one where this client is
+	//the only one in it) and send the message only to that client.
+	room, _ := c.getRoomFromCacheByName(roomName)
 	// If no one is in the room I'm in then just send it to myself.
-	if len(ChatCache.Rooms[roomName]) < 1 {
+	if len(room) < 1 {
 		c.WriteResponse(message, nil)
 	}
-	for _, targetClient := range ChatCache.Rooms[roomName] {
+	for _, targetClient := range room {
 		targetClient.WriteResponse(message, c.Name)
 	}
 }
@@ -242,7 +261,11 @@ func (c *Client) listen() {
 		if input != "" {
 			// These should be commands from the user
 			if strings.HasPrefix(input, "\\") {
-				response, toBroadcast := c.parseResponse(input)
+				response, toBroadcast, err := c.parseResponse(input)
+				if err != nil {
+					go c.broadcastToRoom(response, c.CurrentRoom)
+					break // Sever the connection to this client
+				}
 				if response != "" {
 					if toBroadcast {
 						go c.broadcastToRoom(response, c.CurrentRoom)
@@ -264,7 +287,8 @@ func (c *Client) listen() {
 //  be "broadcast" (to every client in the chat room) we can answer `true` with the accompanying bool.  Most methods
 // should actually return their own values to decide whether their message gets broadcast or not, so we can send
 //error messages privately, etc.
-func (c *Client) parseResponse(cmd string) (string, bool) {
+// TODO - create response type structs instead of returning all this willy nilly?
+func (c *Client) parseResponse(cmd string) (string, bool, error) {
 	value := ""
 	// Attempt to split the command from the proceeding value, determined by a space (if applicable)
 	cmdIndex := strings.IndexByte(cmd, ' ')
@@ -273,28 +297,121 @@ func (c *Client) parseResponse(cmd string) (string, bool) {
 		cmd = cmd[:cmdIndex]
 	}
 	switch {
+	case cmd == "\\dm" && value != "":
+		response, toBroadcast := c.directMessage(value) //TODO - work this out
+		return response, toBroadcast, nil
 	case cmd == "\\name" && value != "":
-		return c.changeClientName(value)
+		response, toBroadcast := c.changeClientName(value)
+		return response, toBroadcast, nil
 	case cmd == "\\create" && value != "":
-		return c.createRoom(value)
+		response, toBroadcast := c.createRoom(value)
+		return response, toBroadcast, nil
 	case cmd == "\\join" && value != "":
-		return c.joinRoom(value)
+		response, toBroadcast := c.joinRoom(value)
+		return response, toBroadcast, nil
 	case cmd == "\\list" && value != "": // list people in another room
-		return c.listMembers(value)
+		response, toBroadcast := c.listMembers(value)
+		return response, toBroadcast, nil
 	case cmd == "\\leave":
 		roomName := c.CurrentRoom
 		c.leaveRoom(c.CurrentRoom)
 		c.CurrentRoom = "" // Set this here because leaveRoom is called from all over
 
-		return fmt.Sprintf("You have left room %s", roomName), false
+		return fmt.Sprintf("You have left room %s", roomName), false, nil
 	case cmd == "\\list": // list the members of your current room
-		return c.listMembers(c.CurrentRoom)
+		response, toBroadcast := c.listMembers(c.CurrentRoom)
+		return response, toBroadcast, nil
 	case cmd == "\\list-rooms":
-		return c.listRooms()
+		response, toBroadcast := c.listRooms()
+		return response, toBroadcast, nil
 	case cmd == "\\whoami":
-		return c.displayClientStats()
+		response, toBroadcast := c.displayClientStats()
+		return response, toBroadcast, nil
+	case cmd == "\\cancel": // cancel current activity (\dm-ing)
+		return "", false, nil //TODO - work this out
+	case cmd == "\\exit":
+		return fmt.Sprintf("%s has gone offline", c.Name), true, io.EOF
 	}
-	// TODO - \\create-private - private room??? - How would that even work?
-	// TODO - Direct message?
-	return fmt.Sprintf("Invalid command: `%s`", cmd), false
+	return fmt.Sprintf("Invalid command: `%s`", cmd), false, nil
+}
+
+func (c *Client) addClientToCache() error {
+	cc := map[string]*Client{}
+	chatClients, found := c.Cache.Get(CLIENTS)
+	if found {
+		cc = chatClients.(map[string]*Client)
+	}
+	// If somehow we already have this client in the cache return and error
+	if cc[c.Id] != nil {
+		return fmt.Errorf("User Conflict: %s user already in service. Please try again.", c.Name)
+	}
+	cc[c.Id] = c
+	c.Cache.Set(CLIENTS, cc, cache2.NoExpiration)
+	return nil
+}
+
+func (c *Client) removeClientFromCache() {
+	cc := map[string]*Client{}
+	chatClients, found := c.Cache.Get(CLIENTS)
+	if found {
+		cc = chatClients.(map[string]*Client)
+	}
+	delete(cc, c.Id)
+	c.Cache.Set(CLIENTS, cc, cache2.NoExpiration)
+}
+
+// NOTE: This and other update methods are not always strictly necessary because we are operating on *Client objects.
+//The pointer is carrying the updates into the memory cache.  Leaving this here though as a good DB pattern, should
+//I decide to update to a more advanced cache or DB beyond this.
+func (c *Client) updateClientInCache() {
+	cc := map[string]*Client{}
+	chatClients, found := c.Cache.Get(CLIENTS)
+	if found {
+		cc = chatClients.(map[string]*Client)
+	}
+	cc[c.Id] = c
+	c.Cache.Set(CLIENTS, cc, cache2.NoExpiration)
+}
+
+func (c *Client) getAllRoomsFromCache() map[string][]*Client {
+	rc := map[string][]*Client{}
+	rooms, found := c.Cache.Get(ROOMS)
+	if found {
+		rc = rooms.(map[string][]*Client)
+	}
+	return rc
+}
+
+// Return the chat room, containing pointers to all the clients currently in the room and a bool indicating whether
+//	or not the room already exists
+func (c *Client) getRoomFromCacheByName(roomName string) ([]*Client, bool) {
+	rc := map[string][]*Client{}
+	rooms, found := c.Cache.Get(ROOMS)
+	if found {
+		rc = rooms.(map[string][]*Client)
+	}
+	if rc[roomName] != nil {
+		return rc[roomName], true
+	}
+	return rc[roomName], false
+}
+
+func (c *Client) updateRoomInCache(roomName string, clientList []*Client) {
+	rc := map[string][]*Client{}
+	rooms, found := c.Cache.Get(ROOMS)
+	if found {
+		rc = rooms.(map[string][]*Client)
+	}
+	rc[roomName] = clientList
+	c.Cache.Set(ROOMS, rc, cache2.NoExpiration)
+}
+
+func (c *Client) deleteRoomFromCache(roomName string) {
+	rc := map[string][]*Client{}
+	rooms, found := c.Cache.Get(ROOMS)
+	if found {
+		rc = rooms.(map[string][]*Client)
+	}
+	delete(rc, roomName)
+	c.Cache.Set(ROOMS, rc, cache2.NoExpiration)
 }

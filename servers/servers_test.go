@@ -9,6 +9,7 @@ import (
 	"github.com/Admiral-Piett/chat-telnet/servers"
 	"github.com/stretchr/testify/assert"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -51,13 +52,15 @@ func Test_Start_success(t *testing.T) {
 	}
 
 	patchCalled := false
-	monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn) {
+	monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn, cache interfaces.AbstractCache) error {
 		patchCalled = true
+		return nil
 	})
 	defer monkey.Unpatch(net.Listen)
 
 	go m.Start()
 	time.Sleep(1 * time.Second) //TODO - find something more elegant than this
+	m.Close()
 
 	assert.True(t, l.AcceptCalled)
 	assert.True(t, patchCalled)
@@ -74,4 +77,29 @@ func Test_Start_Accept_raises_error(t *testing.T) {
 	err := m.Start()
 
 	assert.Error(t, err)
+}
+
+func Test_Start_GenerateNewClient_raises_error(t *testing.T) {
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	patchCalled := false
+	monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn, cache interfaces.AbstractCache) error {
+		patchCalled = true
+		wg.Done()
+		return fmt.Errorf("boom")
+	})
+	defer monkey.Unpatch(net.Listen)
+
+	l := &mocks.NetListenerMock{}
+	m := servers.Server{
+		Listener: l,
+	}
+
+	go m.Start()
+	wg.Wait()
+	m.Close()
+
+	assert.True(t, patchCalled)
+	assert.True(t, l.CloseCalled)
 }

@@ -51,6 +51,7 @@ func (m *NetListenerMock) Addr() net.Addr {
 
 type NetConnMock struct {
 	WriteCalled          bool
+	CloseCalled          bool
 	CalledWith           []byte
 	ReadMock             func(b []byte) (n int, err error)
 	WriteMock            func(b []byte) (n int, err error)
@@ -83,6 +84,7 @@ func (m *NetConnMock) RemoteAddr() net.Addr {
 }
 
 func (m *NetConnMock) Close() error {
+	m.CloseCalled = true
 	return nil
 }
 
@@ -128,4 +130,38 @@ func (m *IoWriterMock) Write(p []byte) (n int, err error) {
 		return m.WriteMock(p)
 	}
 	return 0, nil
+}
+
+type CacheMock struct {
+	GetCalled              bool
+	GetCallCount           int
+	GetCalledWithKey       string
+	SetCalled              bool
+	SetCallCount           int
+	SetCalledWithKey       string
+	SetCalledWithInterface interface{}
+	SetCalledWithDuration  time.Duration
+	GetMock                func(k string) (interface{}, bool)
+	SetMock                func(k string, x interface{}, d time.Duration)
+}
+
+func (m *CacheMock) Get(k string) (interface{}, bool) {
+	m.GetCalled = true
+	m.GetCalledWithKey = k
+	m.GetCallCount++
+	if m.GetMock != nil {
+		return m.GetMock(k)
+	}
+	return nil, false
+}
+
+func (m *CacheMock) Set(k string, x interface{}, d time.Duration) {
+	m.SetCalled = true
+	m.SetCalledWithKey = k
+	m.SetCalledWithInterface = x
+	m.SetCalledWithDuration = d
+	m.SetCallCount++
+	if m.SetMock != nil {
+		m.SetMock(k, x, d)
+	}
 }
