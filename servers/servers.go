@@ -14,15 +14,15 @@ type Server struct {
 }
 
 func NewServer() (Server, error) {
-	address := fmt.Sprintf("%s:%s", os.Getenv("IP_ADDRESS"), os.Getenv("PORT"))
-	l, err := net.Listen("tcp", address)
+	port := os.Getenv("PORT")
+	l, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
 		return Server{}, err
 	}
 	server := Server{
 		Listener: l,
 	}
-	log.Printf("Starting chat-telnet server on address: %s", address)
+	log.Printf("Starting chat-telnet server on port: %s", port)
 	return server, nil
 }
 

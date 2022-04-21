@@ -85,8 +85,12 @@ func Test_Start_GenerateNewClient_raises_error(t *testing.T) {
 
 	patchCalled := false
 	monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn, cache interfaces.AbstractCache) error {
+		// This gets called in a loop so we'll hit the wg a bunch of times before we finish waiting.  So just make sure
+		//we hit it at LEAST once.
+		if !patchCalled {
+			wg.Done()
+		}
 		patchCalled = true
-		wg.Done()
 		return fmt.Errorf("boom")
 	})
 	defer monkey.Unpatch(net.Listen)
