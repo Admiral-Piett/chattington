@@ -50,16 +50,25 @@ func Test_Start_success(t *testing.T) {
 	m := servers.Server{
 		Listener: l,
 	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 
 	patchCalled := false
 	monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn, cache interfaces.AbstractCache) error {
+		// This gets called in a loop that would, in real life hang, waiting for a connection.  So we'll hit the wg
+		//a bunch of times before we finish waiting.  So just make sure we hit it at LEAST once, and simulate
+		//the "hang" below.
+		if !patchCalled {
+			wg.Done()
+		}
 		patchCalled = true
+		time.Sleep(1 * time.Second)
 		return nil
 	})
 	defer monkey.Unpatch(net.Listen)
 
 	go m.Start()
-	time.Sleep(1 * time.Second) //TODO - find something more elegant than this
+	wg.Wait()
 	m.Close()
 
 	assert.True(t, l.AcceptCalled)
@@ -85,12 +94,14 @@ func Test_Start_GenerateNewClient_raises_error(t *testing.T) {
 
 	patchCalled := false
 	monkey.Patch(clients.GenerateNewClient, func(conn interfaces.AbstractNetConn, cache interfaces.AbstractCache) error {
-		// This gets called in a loop so we'll hit the wg a bunch of times before we finish waiting.  So just make sure
-		//we hit it at LEAST once.
+		// This gets called in a loop that would, in real life hang, waiting for a connection.  So we'll hit the wg
+		//a bunch of times before we finish waiting.  So just make sure we hit it at LEAST once, and simulate
+		//the "hang" below.
 		if !patchCalled {
 			wg.Done()
 		}
 		patchCalled = true
+		time.Sleep(1 * time.Second)
 		return fmt.Errorf("boom")
 	})
 	defer monkey.Unpatch(net.Listen)

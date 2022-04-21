@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"chat-telnet/interfaces"
 	"fmt"
-	cache2 "github.com/patrickmn/go-cache"
 	"io"
 	"log"
 	"strings"
@@ -50,9 +49,9 @@ Feel free to join any chat rooms you see, or create a room instead, using the av
 
 Available Commands:
 =====
-\name 	<user name> 	: Change your user name to the <user name> supplied
-\create <room name> 	: Create and join a new chat room with the <room name> supplied
-\join 	<room name> 	: Join an existing chat room with the <room name> supplied
+\name 	<user name>		: Change your user name to the <user name> supplied
+\create <room name>		: Create and join a new chat room with the <room name> supplied
+\join 	<room name>		: Join an existing chat room with the <room name> supplied
 \list 	<room name>		: List members in the chat room named after the <room name> supplied
 \leave					: Leave the room you are currently in
 \list 					: List members in the room you're currently in
@@ -85,6 +84,7 @@ func (c *Client) WriteResponse(msg string, sendingClient interface{}) error {
 	}
 	// Add chat room response formatting
 	msg = fmt.Sprintf("%s %s\n", prefix, msg)
+	log.Print(msg)
 	return c.WriteString(msg)
 }
 
@@ -330,85 +330,4 @@ func (c *Client) parseResponse(cmd string) (string, bool, error) {
 		return fmt.Sprintf("%s has gone offline", c.Name), true, io.EOF
 	}
 	return fmt.Sprintf("Invalid command: `%s`", cmd), false, nil
-}
-
-func (c *Client) addClientToCache() error {
-	cc := map[string]*Client{}
-	chatClients, found := c.Cache.Get(CLIENTS)
-	if found {
-		cc = chatClients.(map[string]*Client)
-	}
-	// If somehow we already have this client in the cache return and error
-	if cc[c.Id] != nil {
-		return fmt.Errorf("User Conflict: %s user already in service. Please try again.", c.Name)
-	}
-	cc[c.Id] = c
-	c.Cache.Set(CLIENTS, cc, cache2.NoExpiration)
-	return nil
-}
-
-func (c *Client) removeClientFromCache() {
-	cc := map[string]*Client{}
-	chatClients, found := c.Cache.Get(CLIENTS)
-	if found {
-		cc = chatClients.(map[string]*Client)
-	}
-	delete(cc, c.Id)
-	c.Cache.Set(CLIENTS, cc, cache2.NoExpiration)
-}
-
-// NOTE: This and other update methods are not always strictly necessary because we are operating on *Client objects.
-//The pointer is carrying the updates into the memory cache.  Leaving this here though as a good DB pattern, should
-//I decide to update to a more advanced cache or DB beyond this.
-func (c *Client) updateClientInCache() {
-	cc := map[string]*Client{}
-	chatClients, found := c.Cache.Get(CLIENTS)
-	if found {
-		cc = chatClients.(map[string]*Client)
-	}
-	cc[c.Id] = c
-	c.Cache.Set(CLIENTS, cc, cache2.NoExpiration)
-}
-
-func (c *Client) getAllRoomsFromCache() map[string][]*Client {
-	rc := map[string][]*Client{}
-	rooms, found := c.Cache.Get(ROOMS)
-	if found {
-		rc = rooms.(map[string][]*Client)
-	}
-	return rc
-}
-
-// Return the chat room, containing pointers to all the clients currently in the room and a bool indicating whether
-//	or not the room already exists
-func (c *Client) getRoomFromCacheByName(roomName string) ([]*Client, bool) {
-	rc := map[string][]*Client{}
-	rooms, found := c.Cache.Get(ROOMS)
-	if found {
-		rc = rooms.(map[string][]*Client)
-	}
-	if rc[roomName] != nil {
-		return rc[roomName], true
-	}
-	return rc[roomName], false
-}
-
-func (c *Client) updateRoomInCache(roomName string, clientList []*Client) {
-	rc := map[string][]*Client{}
-	rooms, found := c.Cache.Get(ROOMS)
-	if found {
-		rc = rooms.(map[string][]*Client)
-	}
-	rc[roomName] = clientList
-	c.Cache.Set(ROOMS, rc, cache2.NoExpiration)
-}
-
-func (c *Client) deleteRoomFromCache(roomName string) {
-	rc := map[string][]*Client{}
-	rooms, found := c.Cache.Get(ROOMS)
-	if found {
-		rc = rooms.(map[string][]*Client)
-	}
-	delete(rc, roomName)
-	c.Cache.Set(ROOMS, rc, cache2.NoExpiration)
 }
