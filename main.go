@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/Admiral-Piett/chat-telnet/servers"
+	"chat-telnet/servers"
 	"log"
 )
 

@@ -2,9 +2,9 @@ package clients
 
 import (
 	"bou.ke/monkey"
+	"chat-telnet/interfaces"
+	"chat-telnet/mocks"
 	"fmt"
-	"github.com/Admiral-Piett/chat-telnet/interfaces"
-	"github.com/Admiral-Piett/chat-telnet/mocks"
 	cache2 "github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/assert"
 	"io"

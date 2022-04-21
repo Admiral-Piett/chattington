@@ -1,10 +1,12 @@
 package servers
 
 import (
-	"github.com/Admiral-Piett/chat-telnet/clients"
+	"chat-telnet/clients"
+	"fmt"
 	cache2 "github.com/patrickmn/go-cache"
 	"log"
 	"net"
+	"os"
 )
 
 type Server struct {
@@ -12,13 +14,15 @@ type Server struct {
 }
 
 func NewServer() (Server, error) {
-	l, err := net.Listen("tcp", ":2000")
+	address := fmt.Sprintf("%s:%s", os.Getenv("IP_ADDRESS"), os.Getenv("PORT"))
+	l, err := net.Listen("tcp", address)
 	if err != nil {
 		return Server{}, err
 	}
 	server := Server{
 		Listener: l,
 	}
+	log.Printf("Starting chat-telnet server on address: %s", address)
 	return server, nil
 }
 

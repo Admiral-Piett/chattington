@@ -2,8 +2,8 @@ package clients
 
 import (
 	"bufio"
+	"chat-telnet/interfaces"
 	"fmt"
-	"github.com/Admiral-Piett/chat-telnet/interfaces"
 	cache2 "github.com/patrickmn/go-cache"
 	"io"
 	"log"
@@ -298,8 +298,7 @@ func (c *Client) parseResponse(cmd string) (string, bool, error) {
 	}
 	switch {
 	case cmd == "\\dm" && value != "":
-		response, toBroadcast := c.directMessage(value) //TODO - work this out
-		return response, toBroadcast, nil
+		//TODO
 	case cmd == "\\name" && value != "":
 		response, toBroadcast := c.changeClientName(value)
 		return response, toBroadcast, nil
@@ -327,8 +326,6 @@ func (c *Client) parseResponse(cmd string) (string, bool, error) {
 	case cmd == "\\whoami":
 		response, toBroadcast := c.displayClientStats()
 		return response, toBroadcast, nil
-	case cmd == "\\cancel": // cancel current activity (\dm-ing)
-		return "", false, nil //TODO - work this out
 	case cmd == "\\exit":
 		return fmt.Sprintf("%s has gone offline", c.Name), true, io.EOF
 	}

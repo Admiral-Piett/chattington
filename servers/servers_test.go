@@ -2,11 +2,11 @@ package servers_test
 
 import (
 	"bou.ke/monkey"
+	"chat-telnet/clients"
+	"chat-telnet/interfaces"
+	"chat-telnet/mocks"
+	"chat-telnet/servers"
 	"fmt"
-	"github.com/Admiral-Piett/chat-telnet/clients"
-	"github.com/Admiral-Piett/chat-telnet/interfaces"
-	"github.com/Admiral-Piett/chat-telnet/mocks"
-	"github.com/Admiral-Piett/chat-telnet/servers"
 	"github.com/stretchr/testify/assert"
 	"net"
 	"sync"
