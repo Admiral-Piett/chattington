@@ -50,5 +50,6 @@ func NewChatCache() *cache2.Cache {
 	c := cache2.New(cache2.NoExpiration, cache2.NoExpiration)
 	c.Set(clients.CLIENTS, map[string]*clients.Client{}, cache2.NoExpiration)
 	c.Set(clients.ROOMS, map[string][]*clients.Client{}, cache2.NoExpiration)
+	c.Set(clients.PRIVATE_ROOMS, map[string][]*clients.Client{}, cache2.NoExpiration)
 	return c
 }
