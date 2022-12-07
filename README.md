@@ -7,9 +7,6 @@ generating Client objects for each connection.  Clients are held in a memory cac
 and are then responsible for managing themselves.  They can, move themselves in and out of different chat rooms, 
 change their names, create rooms, even terminate their connection to the server (see full functionality below).
 
-This was fun!  I had a great time dealing with this and had a few more things in mind, but sadly I ran out of time.  
-Can't wait to hear what you think!
-
 #### Limitations/Nuances
 - You must be in a room for anyone to see what you are writing.
     - When you join you are not in any room at all, which is a valid state but there is no default room.  So 
