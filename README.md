@@ -3,12 +3,12 @@
 the IP hosting the server and on the port specified in the `app.env` file (which contains all the config).
 
 My approach became a sort of Multiton pattern, where a single server is responsible for fielding connections and 
-generating Client objects for each connection.  Clients are held in a memory cache (using the `go-cache` packcage), 
-and are then responsible for managing themselves.  They can, moving themselves in and out of different chat rooms, 
+generating Client objects for each connection.  Clients are held in a memory cache (using the `go-cache` package), 
+and are then responsible for managing themselves.  They can, move themselves in and out of different chat rooms, 
 change their names, create rooms, even terminate their connection to the server (see full functionality below).
 
 This was fun!  I had a great time dealing with this and had a few more things in mind, but sadly I ran out of time.  
-Can't wait to hear what you thinks!
+Can't wait to hear what you think!
 
 #### Limitations/Nuances
 - You must be in a room for anyone to see what you are writing.
