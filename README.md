@@ -15,7 +15,7 @@ change their names, create rooms, even terminate their connection to the server 
 - current room (again, if you are in one).
 
 #### Future Opportunities
-- Direct Messaging/Private Rooms - I have some experiments around this on an alternate branch, but I ran out of time.
+- Direct Messaging/Private Rooms.
 - API Endpoints or supporting other connection protocols. 
 
 ## Installation/Quick Start
